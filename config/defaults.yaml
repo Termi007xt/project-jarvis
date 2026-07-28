@@ -1,0 +1,107 @@
+schema_version: 1
+
+runtime:
+  required_python: ">=3.11,<3.13"
+
+models:
+  planner:
+    provider: ollama
+    name: qwen3.5:9b-q4_K_M
+    context_length: 16384
+
+  vision:
+    provider: ollama
+    name: qwen3-vl:8b-instruct-q4_K_M
+    context_length: 8192
+
+  embeddings:
+    provider: ollama
+    name: qwen3-embedding:0.6b
+    context_length: 8192
+
+model_runtime:
+  idle_unload_seconds: 180
+  load_strategy: sequential
+  allow_parallel_heavy_models: false
+
+audio:
+  wake_word:
+    provider: openwakeword
+    phrase: "Hey Jarvis"
+    push_to_talk_enabled: true
+
+  speech_to_text:
+    provider: faster_whisper
+    model: small
+    device: cpu
+    compute_type: int8
+    language: en
+    vad_filter: true
+    retain_raw_audio: false
+    beam_size: 1
+    preload_on_startup: true
+    warmup_on_startup: true
+    idle_unload_seconds: 0
+
+  text_to_speech:
+    active_profile: kokoro_bm_george
+
+    profiles:
+      kokoro_bm_george:
+        provider: kokoro
+        model_repository: hexgrad/Kokoro-82M
+        python_runtime: "3.11"
+        language_code: "b"
+        spoken_language: English
+        voice: bm_george
+        device: cpu
+        speed: 1.0
+        sample_rate_hz: 24000
+        enabled: true
+
+      qwen3_tts_expressive:
+        provider: qwen3_tts
+        model_repository: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+        python_runtime: "3.12"
+        execution_mode: isolated_worker
+        spoken_language: English
+        device: cuda
+        enabled: false
+        status: experimental
+
+      windows_sapi:
+        provider: windows_sapi
+        spoken_language: English
+        enabled: true
+        fallback_only: true
+
+  pronunciation:
+    provider: espeak-ng
+    architecture: x64
+    installation_scope: Windows system
+    status: to_be_verified
+
+  language:
+    recognition:
+      mode: en
+      preferred_languages:
+        - en
+
+    conversation:
+      understand:
+        - English
+
+    response_language: English
+
+    spoken_output:
+      default_language: English
+
+storage:
+  huggingface_home: "%LOCALAPPDATA%\\ProjectJarvis\\models\\huggingface"
+  application_data: "%LOCALAPPDATA%\\ProjectJarvis"
+  workspace: "%USERPROFILE%\\Documents\\Jarvis Workspace"
+
+privacy:
+  raw_audio_retention: disabled
+  generated_voice_retention: temporary
+  screenshot_retention: task_only

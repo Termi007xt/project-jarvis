@@ -1,0 +1,29 @@
+# Python
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# Local configuration
+.local/
+config/user.yaml
+
+# Generated audio and diagnostics
+tools/voice-lab/output/
+*.wav
+
+# Runtime data
+data/
+logs/
+temp/
+attachments/
+backups/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+*.key
+*.pem
