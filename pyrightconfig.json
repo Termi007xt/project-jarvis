@@ -1,0 +1,8 @@
+{
+  "venvPath": "tools/qwen-tts-lab",
+  "venv": "qwen_tts_clean",
+  "extraPaths": [
+    "C:/Users/sharm/source/repos/project-jarvis/tools/qwen-tts-lab/qwen_tts_clean/Lib/site-packages",
+    "tools/qwen-tts-lab/qwen_tts_clean/Lib/site-packages"
+  ]
+}
