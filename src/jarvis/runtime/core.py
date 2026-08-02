@@ -37,7 +37,12 @@ from jarvis.core.tools.approvals import ApprovalQueue
 from jarvis.core.tools.invoker import ToolCall, ToolInvoker
 from jarvis.core.tools.ports import ApprovalPort
 from jarvis.core.tools.registry import ToolRegistry
+from jarvis.llm.conversation import ConversationEngine
+from jarvis.llm.history import Conversation, ConversationStore
+from jarvis.llm.ollama.chat import OllamaChatProvider
 from jarvis.llm.ollama.health import OllamaHealth, OllamaHealthChecker
+from jarvis.llm.personality import PersonalityStore
+from jarvis.llm.routing import ModelRouter
 from jarvis.runtime.single_instance import SingleInstanceGuard
 from jarvis.runtime.workers import PeriodicWorker, WorkerSupervisor
 from jarvis.storage.database import Database
@@ -138,6 +143,10 @@ class JarvisCore:
         self.registry: ToolRegistry
         self.approvals: ApprovalQueue | None = None
         self.secrets: SecretStore
+        self.models: ModelRouter
+        self.history: ConversationStore
+        self.personality: PersonalityStore
+        self.conversation: ConversationEngine
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -238,6 +247,15 @@ class JarvisCore:
             event_bus=self.events,
         )
 
+        # 8b. conversation (Phase 1). The provider is constructed even when
+        # Ollama is unreachable, so the Conversation screen can say why rather
+        # than the feature simply being absent (ADR-0010).
+        self.models = ModelRouter(self.config)
+        self.history = ConversationStore(self.database, self.audit)
+        self.personality = PersonalityStore(self.database, self.audit)
+        self.personality.ensure_default()
+        self.conversation = self._build_conversation_engine()
+
         # 9. Phase 0 tools, runners and bootstrap grants
         self.registry.register(SystemHealthTool(self.config, self.paths))
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
@@ -280,6 +298,35 @@ class JarvisCore:
             )
         )
         return self
+
+    def _build_conversation_engine(self) -> ConversationEngine:
+        planner = self.models.resolve(ModelRole.CONVERSATION)
+        provider = OllamaChatProvider(
+            self.config.llm.ollama.base_url,
+            planner.name,
+            timeout_seconds=self.config.tasks.step_timeout_seconds,
+            require_loopback=self.config.llm.ollama.require_loopback,
+            network_mode=self.config.network.mode,
+            context_length=planner.context_length,
+        )
+        return ConversationEngine(
+            provider,
+            self.invoker,
+            history=self.history,
+            personality=self.personality,
+            registry=self.registry,
+            session_id=self.session_id,
+        )
+
+    def start_conversation(
+        self, title: str = "Conversation", *, private: bool = False
+    ) -> Conversation:
+        """Begin a conversation. A private one writes nothing (FR-046, AT-014)."""
+        return self.history.start(
+            title,
+            persist=False if private else None,
+            model=self.models.resolve(ModelRole.CONVERSATION).name,
+        )
 
     def _seed_bootstrap_grants(self) -> None:
         """Grant the two strictly self-inspecting capabilities on first start.
