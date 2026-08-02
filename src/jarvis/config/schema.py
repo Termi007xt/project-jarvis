@@ -102,6 +102,14 @@ class WakeWordConfig(_Base):
     provider: str
     phrase: str
     push_to_talk_enabled: bool = True
+    #: PRD FR-018 and ADR-0027 specify bare F9. It is configurable because a
+    #: global hook swallows the key from every other application, and F9 is
+    #: heavily used by IDEs, spreadsheets and games.
+    push_to_talk_hotkey: str = "F9"
+    #: ADR-0016: always-listening stays off until enrolment has been measured
+    #: and passed. Push-to-talk is the fallback until then.
+    always_listening: bool = False
+    enrolled: bool = False
 
 
 class SpeechToTextConfig(_Base):
@@ -224,6 +232,11 @@ class UiConfig(_Base):
     start_minimised_to_tray: bool = True
     show_unavailable_features: bool = True
     emergency_stop_hotkey: str = "Ctrl+Alt+Pause"
+    #: PRD FR-002. Registered per-user, so it never needs elevation (ADR-0009).
+    start_at_sign_in: bool = False
+    #: An unanswered approval is denied after this long (ADR-0027). Bounded by
+    #: PRD NFR-013: there is no "wait forever" option.
+    approval_timeout_seconds: Annotated[float, Field(gt=0, le=900)] = 120.0
 
 
 class StorageConfig(_Base):

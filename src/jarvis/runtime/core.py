@@ -32,7 +32,8 @@ from jarvis.core.events.types import (
 )
 from jarvis.core.permissions.engine import DefaultPolicy, PermissionEngine
 from jarvis.core.permissions.models import Decision, GrantScope
-from jarvis.core.tools.approvals import DEFAULT_APPROVAL_TIMEOUT_SECONDS, ApprovalQueue
+from jarvis.core.secrets import SecretStore
+from jarvis.core.tools.approvals import ApprovalQueue
 from jarvis.core.tools.invoker import ToolCall, ToolInvoker
 from jarvis.core.tools.ports import ApprovalPort
 from jarvis.core.tools.registry import ToolRegistry
@@ -103,7 +104,7 @@ class JarvisCore:
         *,
         config_store: ConfigStore | None = None,
         approvals: ApprovalPort | None = None,
-        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        approval_timeout_seconds: float | None = None,
         single_instance: SingleInstanceGuard | None = None,
         enforce_single_instance: bool = True,
         session_id: str | None = None,
@@ -136,6 +137,7 @@ class JarvisCore:
         self.permissions: PermissionEngine
         self.registry: ToolRegistry
         self.approvals: ApprovalQueue | None = None
+        self.secrets: SecretStore
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -183,6 +185,7 @@ class JarvisCore:
             ),
         )
         self.registry = ToolRegistry(self.audit, self.events)
+        self.secrets = SecretStore(self.database, self.audit)
 
         # 6b. the approval surface's queue (ADR-0027). It denies everything
         # until a user interface calls set_interactive(True).
@@ -191,7 +194,11 @@ class JarvisCore:
             self.approvals = ApprovalQueue(
                 audit=self.audit,
                 event_bus=self.events,
-                timeout_seconds=self._approval_timeout_seconds,
+                timeout_seconds=(
+                    self._approval_timeout_seconds
+                    if self._approval_timeout_seconds is not None
+                    else self.config.ui.approval_timeout_seconds
+                ),
             )
             approval_port = self.approvals
         else:

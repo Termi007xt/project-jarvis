@@ -187,8 +187,87 @@ CREATE INDEX ix_tool_invocation_task ON tool_invocation (task_id);
 """
 
 
+_M002_SECRETS_AND_CONVERSATION = """
+-- Protected secrets (ADR-0030, PRD 18.3, NFR-022). The value is DPAPI
+-- ciphertext and is never queryable; the metadata beside it is not sensitive
+-- and is what the Integrations screen lists so a user can see, and delete,
+-- what is stored. Excluded from normal exports (FR-169, AT-016).
+CREATE TABLE secret (
+    name          TEXT PRIMARY KEY,
+    purpose       TEXT NOT NULL,
+    owner         TEXT NOT NULL,
+    ciphertext    BLOB NOT NULL,
+    protection    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    last_used_at  TEXT
+);
+
+-- Conversation history (PRD FR-045). A private session (FR-046, AT-014)
+-- never writes a row here at all; ``persisted`` records the choice for
+-- conversations that did, so history controls can explain themselves.
+CREATE TABLE conversation (
+    conversation_id TEXT PRIMARY KEY,
+    title           TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    ended_at        TEXT,
+    model           TEXT,
+    persisted       INTEGER NOT NULL DEFAULT 1,
+    message_count   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX ix_conversation_started ON conversation (started_at);
+
+-- One turn. ``source_label`` is the FR-047 grounding label: whether this came
+-- from the model, a retrieved fact, an inference, a tool result, or is an
+-- admission of uncertainty.
+CREATE TABLE message (
+    message_id      TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id) ON DELETE CASCADE,
+    sequence        INTEGER NOT NULL,
+    role            TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    source_label    TEXT,
+    tool_id         TEXT,
+    task_id         TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX ix_message_conversation ON message (conversation_id, sequence);
+
+-- The personality profile (PRD FR-043). Editable by the user; never learned
+-- silently (PRD 4.4, FR-044 proposals are approval-gated).
+CREATE TABLE personality_profile (
+    profile_id  TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    formality   TEXT NOT NULL,
+    humour      TEXT NOT NULL,
+    verbosity   TEXT NOT NULL,
+    address_as  TEXT,
+    active      INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- A proposed personality or humour adjustment awaiting the user's decision.
+-- Nothing here affects behaviour until it is approved (PRD 4.4, FR-044).
+CREATE TABLE personality_proposal (
+    proposal_id TEXT PRIMARY KEY,
+    profile_id  TEXT NOT NULL REFERENCES personality_profile (profile_id) ON DELETE CASCADE,
+    field       TEXT NOT NULL,
+    current_value TEXT,
+    proposed_value TEXT NOT NULL,
+    evidence    TEXT,
+    status      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT
+);
+CREATE INDEX ix_personality_proposal_status ON personality_proposal (status);
+"""
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, name="phase0_foundation", sql=_M001_FOUNDATION),
+    Migration(version=2, name="phase1_secrets_and_conversation",
+              sql=_M002_SECRETS_AND_CONVERSATION),
 )
 
 SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -216,6 +295,11 @@ def split_statements(sql: str) -> list[str]:
     migration. Statements are therefore executed one at a time inside our own
     transaction.
 
+    Comments are removed **before** splitting. Removing them afterwards means a
+    semicolon inside a comment splits the script mid-sentence, and the prose
+    after it is handed to SQLite as though it were SQL — which fails with a
+    syntax error pointing at an English word rather than at the comment.
+
     Compound ``BEGIN ... END`` blocks (triggers) are rejected rather than
     mis-split: a migration that needs one must add explicit handling first.
     """
@@ -224,14 +308,10 @@ def split_statements(sql: str) -> list[str]:
             "migration contains a compound BEGIN...END block, which the simple "
             "statement splitter cannot handle safely"
         )
-    statements = []
-    for chunk in sql.split(";"):
-        stripped = "\n".join(
-            line for line in chunk.splitlines() if not line.strip().startswith("--")
-        ).strip()
-        if stripped:
-            statements.append(stripped)
-    return statements
+    without_comments = "\n".join(
+        line for line in sql.splitlines() if not line.strip().startswith("--")
+    )
+    return [chunk.strip() for chunk in without_comments.split(";") if chunk.strip()]
 
 
 def migrate(database: Database) -> int:

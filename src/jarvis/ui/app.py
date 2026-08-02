@@ -24,7 +24,8 @@ from jarvis.core.events.types import (
     TaskStateChanged,
 )
 from jarvis.runtime.core import JarvisCore
-from jarvis.tasks.states import ACTIVE_STATES, TERMINAL_STATES, TaskState
+from jarvis.runtime.hotkeys import GlobalHotkeys
+from jarvis.tasks.states import TaskState
 from jarvis.ui.approval import ApprovalController
 from jarvis.ui.icons import TrayState
 from jarvis.ui.main_window import MainWindow
@@ -49,12 +50,17 @@ class JarvisApplication(QObject):
         self.window = MainWindow(core)
         self.tray = JarvisTrayIcon(self)
         self.bridge = EventBridge(core.events, self)
+        #: Set by the voice controller in stage 3. Until then push-to-talk says
+        #: plainly that the stack is not ready rather than doing nothing.
+        self.voice: object | None = None
 
         # The approval surface exists, so the engine may now ask. Until this
         # line runs, the queue denies everything (ADR-0010).
         self.approvals = ApprovalController(core.approvals, core, self) if core.approvals else None
         if core.approvals is not None:
             core.approvals.set_interactive(True)
+
+        self.hotkeys = self._register_hotkeys()
 
         self._connect()
         self.tray.set_network_mode(core.config.network.mode)
@@ -213,6 +219,50 @@ class JarvisApplication(QObject):
         if self.window.isVisible():
             self.window.refresh_all()
 
+    # -- hotkeys (PRD 11.3, FR-018) ---------------------------------------
+    def _register_hotkeys(self) -> GlobalHotkeys:
+        """Emergency stop and push-to-talk, both configurable.
+
+        Hotkey callbacks arrive on the hotkey thread, so they only ever queue
+        work onto the Qt thread — touching widgets from there would be a
+        cross-thread violation Qt would not survive.
+        """
+        config = self._core.config
+        hotkeys = GlobalHotkeys()
+        hotkeys.add(
+            "emergency_stop",
+            config.ui.emergency_stop_hotkey,
+            lambda: QTimer.singleShot(0, self.emergency_stop_from_hotkey),
+        )
+        hotkeys.add(
+            "push_to_talk",
+            config.audio.wake_word.push_to_talk_hotkey,
+            lambda: QTimer.singleShot(0, self.push_to_talk),
+        )
+        hotkeys.start()
+
+        for binding in hotkeys.unavailable():
+            # Never silently missing: the user asked for this key and did not
+            # get it, and only they can resolve the conflict (ADR-0010).
+            _LOG.warning("hotkey unavailable — %s", binding.describe())
+        return hotkeys
+
+    def emergency_stop_from_hotkey(self) -> None:
+        report = self._core.emergency_stop(origin="hotkey")
+        _LOG.info("emergency stop via hotkey: %s", report.describe())
+
+    def push_to_talk(self) -> None:
+        """Phase 1 stage 3 wires this to capture. Until then it says so."""
+        toggle = getattr(self.voice, "toggle_push_to_talk", None)
+        if toggle is not None:
+            toggle()
+            return
+        self.tray.notify(
+            "Push to talk is not ready",
+            "The voice stack is not available on this machine yet. "
+            "The Voice screen explains what is missing.",
+        )
+
     # -- actions -----------------------------------------------------------
     def show_window(self, area: str | None = None) -> None:
         if area:
@@ -255,6 +305,7 @@ class JarvisApplication(QObject):
     def quit(self) -> None:
         self._refresh_timer.stop()
         self.bridge.detach()
+        self.hotkeys.stop()
         if self.approvals is not None:
             self.approvals.panel.hide()
         self.tray.hide()

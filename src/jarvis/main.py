@@ -39,6 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start the core headlessly, print a status report and exit.",
     )
     parser.add_argument(
+        "--require-healthy",
+        action="store_true",
+        help=(
+            "With --check, exit non-zero when the local model runtime is "
+            "unreachable. Without it, an honest report of an unreachable "
+            "runtime is still a successful self-check."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default=None,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -52,9 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_check(core: JarvisCore) -> int:
+def _run_check(core: JarvisCore, require_healthy: bool = False) -> int:
+    from jarvis.audio.availability import describe_voice_stack
+
     status = core.status()
     health = core.refresh_health()
+    voice = describe_voice_stack(core.config)
     print(f"{APP_NAME} {status.app_version}")
     print(f"  vault            {status.vault_root}")
     print(f"  database schema  v{status.schema_version}")
@@ -66,9 +78,20 @@ def _run_check(core: JarvisCore) -> int:
     print(f"  active tasks     {status.active_tasks}")
     print(f"  recovery         {status.recovery.describe() if status.recovery else 'not run'}")
     print(f"  model runtime    {health.describe()}")
+    print(f"  secret store     {'available' if core.secrets.available else 'unavailable'}")
+    print(f"  voice stack      {voice.summary()}")
     print(f"  audit records    {core.audit.count()}")
-    # A health check that could not reach the runtime is still a successful
-    # self-check: it reported honestly. Only a crash is a failure.
+
+    # An unreachable runtime reported honestly is still a successful
+    # self-check; only a crash is a failure. --require-healthy is for callers
+    # that need the stronger statement, such as a deployment gate.
+    if require_healthy and not health.reachable:
+        print(
+            "  --require-healthy was given and the local model runtime is not "
+            f"reachable: {health.error or health.skipped_reason or 'no detail'}",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -88,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         try:
-            return _run_check(core)
+            return _run_check(core, require_healthy=args.require_healthy)
         finally:
             core.shutdown("--check completed")
 

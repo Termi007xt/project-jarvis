@@ -254,12 +254,20 @@ def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
 
 
 def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> None:
-    """Screenshot-based computer control is out of scope for Phase 0."""
+    """Screenshot-based computer control is still out of scope.
+
+    Phase 1 legitimately adds ``jarvis.audio``, so the "no audio package"
+    assertion this test carried through Phase 0 has been replaced by the
+    constraint it was really protecting: no heavy or computer-control library
+    may be imported at module scope. That keeps the engine importable on Linux
+    with no audio stack installed, which is what makes the CI matrix meaningful
+    (ARCHITECTURE section 11). See ``tests/security/test_lazy_audio_imports.py``
+    for the Phase 1 statement of the same rule.
+    """
     package = repo_root / "src" / "jarvis"
     assert not (package / "automation").exists(), "automation lands in Phase 2"
-    assert not (package / "audio").exists(), "audio lands in Phase 1"
 
-    banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2", "sounddevice"}
+    banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
     for path in package.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -419,6 +427,49 @@ def test_the_cli_check_command_reports_status(vault) -> None:
         ["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"]
     )
     assert exit_code == 0
+
+
+def test_check_stays_successful_when_the_model_runtime_is_unreachable(
+    vault, monkeypatch
+) -> None:
+    """An honest report of an unreachable runtime is a successful self-check.
+
+    Settled 2026-08-02 (PROJECT_STATE decision 7): --check keeps exit 0, and
+    callers needing the stronger statement pass --require-healthy.
+    """
+    from jarvis.main import main
+
+    monkeypatch.setenv("JARVIS__LLM__OLLAMA__BASE_URL", "http://127.0.0.1:1")
+    assert main(["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"]) == 0
+
+
+def test_require_healthy_makes_an_unreachable_runtime_a_failure(
+    vault, monkeypatch, capsys
+) -> None:
+    from jarvis.main import main
+
+    monkeypatch.setenv("JARVIS__LLM__OLLAMA__BASE_URL", "http://127.0.0.1:1")
+    exit_code = main(
+        [
+            "--check",
+            "--require-healthy",
+            "--data-dir",
+            str(vault.root),
+            "--allow-multiple-instances",
+        ]
+    )
+    assert exit_code == 1
+    assert "--require-healthy" in capsys.readouterr().err
+
+
+def test_check_reports_the_voice_stack_and_secret_store(vault, capsys) -> None:
+    """Phase 1 state must be visible from the headless self-check."""
+    from jarvis.main import main
+
+    main(["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"])
+    output = capsys.readouterr().out
+    assert "voice stack" in output
+    assert "secret store" in output
 
 
 def test_offline_mode_is_reachable_from_configuration(core: JarvisCore) -> None:

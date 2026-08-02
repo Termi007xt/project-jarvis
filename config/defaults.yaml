@@ -48,8 +48,16 @@ model_runtime:
 audio:
   wake_word:
     provider: openwakeword
+    # ADR-0016 Path 1 layers a personal verifier on a pretrained base model, and
+    # openWakeWord ships one for "Hey Jarvis" but not for bare "Jarvis". The GUI
+    # must show the enrolled phrase truthfully and must never imply this model
+    # detects "Jarvis" alone (FR-011).
     phrase: "Hey Jarvis"
     push_to_talk_enabled: true
+    push_to_talk_hotkey: "F9"
+    # Stays false until enrolment has been measured and passed (ADR-0016).
+    always_listening: false
+    enrolled: false
 
   speech_to_text:
     provider: faster_whisper
@@ -143,6 +151,8 @@ ui:
   start_minimised_to_tray: true
   show_unavailable_features: true
   emergency_stop_hotkey: "Ctrl+Alt+Pause"
+  start_at_sign_in: false
+  approval_timeout_seconds: 120.0
 
 storage:
   huggingface_home: "%LOCALAPPDATA%\\ProjectJarvis\\models\\huggingface"
