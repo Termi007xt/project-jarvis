@@ -3,10 +3,11 @@
 ## Snapshot
 - **Last updated:** 2026-08-02
 - **Current branch:** `feat/PHASE-1-development`
-- **HEAD commit:** `df4a35b` — Phase 1 documentation baseline; working tree clean
-- **Active phase:** **Phase 1 — voice-first local assistant, in progress**
-- **Overall status:** Green. Phase 0 baseline re-verified on this branch:
-  `python -m pytest` → **386 passed in 8.01s**, exit 0. Nothing blocked.
+- **HEAD commit:** `54c4d08` — Phase 1 stages 1–3 complete; working tree clean
+- **Active phase:** **Phase 1 — voice-first local assistant, stages 1–3 done, stage 4 blocked**
+- **Overall status:** Green. `python -m pytest` → **617 passed, 2 skipped**
+  (Phase 0 baseline was 386). One thing is blocked and it is named below:
+  stage 4 needs **ADR-0029 accepted** before any launcher code may be written.
 
 ## Current Objective
 
@@ -21,12 +22,12 @@ Phase 1 is delivered as four ordered stages. The order is forced by dependency,
 not preference: nothing requiring approval can run until stage 1 exists, and
 voice is only useful once there is something to talk to.
 
-| Stage | Contents | Work items |
-|---|---|---|
-| 1 — Unblock | Approval dialog, DPAPI secret store, global hotkeys, startup-at-sign-in, `--require-healthy` | P1-SEC-01, P1-SEC-02, P1-UI-02, P1-COR-03 |
-| 2 — Converse | Ollama chat with structured tool calls, model routing, bounded context, source labelling, tool-grounded success, history and private session, Conversation screen | P1-LLM-01…03, P1-COR-01, P1-COR-02, P1-MEM-01…03, P1-UI-01 |
-| 3 — Voice | TTS (Kokoro) → STT (faster-whisper) → capture, ring buffer, VAD, full-duplex barge-in → wake word with per-user enrolment and measurement | P1-AUD-01…09 |
-| 4 — Act | The six initial approved tools: open application, open URL, media control, volume control, speak, notify | P1-APP-01, P1-BRW-01, P1-WIN-01, P1-UI-03 |
+| Stage | Contents | Work items | Status |
+|---|---|---|---|
+| 1 — Unblock | Approval dialog, DPAPI secret store, global hotkeys, startup-at-sign-in, `--require-healthy` | P1-SEC-01, P1-SEC-02, P1-UI-02, P1-COR-03 | **Done** |
+| 2 — Converse | Ollama chat with structured tool calls, model routing, bounded context, source labelling, tool-grounded success, history and private session, Conversation screen | P1-LLM-01…03, P1-COR-01, P1-COR-02, P1-MEM-01…03, P1-UI-01 | **Done** |
+| 3 — Voice | TTS (Kokoro), STT (faster-whisper), capture, ring buffer, VAD, full-duplex barge-in, wake detector and the Voice screen | P1-AUD-01…09 | **Done except wake enrolment**, which needs the base model (item B) |
+| 4 — Act | The six initial approved tools: open application, open URL, media control, volume control, speak, notify | P1-APP-01, P1-BRW-01, P1-WIN-01, P1-UI-03 | **Not started — blocked on ADR-0029** |
 
 **Delivery mode decided 2026-08-02:** continuous run to the end of the phase, no
 intermediate approval checkpoints. Two exceptions are unavoidable and are named
@@ -62,11 +63,31 @@ Confirmed by passing tests or direct observation:
   working, since Kokoro requires it for English phonemisation.
 
 ## Completed in Current Phase
+
 Phase 0 is complete and closed. See `docs/phase-reports/PHASE-00-FOUNDATION.md`.
-Phase 1 stage progress is tracked in the objective table above.
+
+**Phase 1 stages 1–3 are implemented, tested and committed.** Highlights that
+change what the product can do:
+
+- **The approval dialog exists**, so capabilities beyond the two self-inspection
+  grants can finally run. Tray-anchored and non-modal (ADR-0027), timing out as
+  denied, with rememberable scoped denials and a keyboard route (NFR-030).
+- **A DPAPI secret store** (ADR-0030), verified by asserting the plaintext is
+  absent from the database, the audit log and the configuration file after a
+  round trip.
+- **Text conversation works against the local model.** Free text and structured
+  tool calls are separate fields and nothing promotes one into the other; every
+  proposal goes through the invoker's six checks; every reply is source-labelled
+  and cannot claim a success no tool verified.
+- **The voice stack is verified on this hardware**: Kokoro `bm_george`
+  synthesised 5.35s of audio and faster-whisper `small` transcribed it back
+  exactly. Redaction removed a key before synthesis. Six input devices enumerate.
+- **Storage now uses `PRAGMA secure_delete`.** Deleted conversation history was
+  previously still readable in the database file.
 
 ## In Progress
-Phase 1, stage 1. See "Next Exact Steps".
+
+Nothing is part-built. Stage 4 has not been started because it is blocked.
 
 ## Blocked or Failing
 No test is failing. Three things discovered on 2026-08-02 that the Phase 0
@@ -92,16 +113,28 @@ handoff did not record, each of which gates part of Phase 1:
    concrete acquisition task with a network download, not a code task.
 
 ## Tests and Quality Checks
-- **Last successful:** `python -m pytest` → 386 passed (2026-08-02).
-  Per suite: unit 201, security 97, integration 24, ui 26, acceptance 38.
+- **Last successful:** `python -m pytest` → **617 passed, 2 skipped** (2026-08-02).
+  The two skips are the non-Windows branches of the secret store, which cannot
+  run on this platform by definition.
 - **Last failed:** none.
+- **Verified outside the suite, on this machine:**
+  - `python -m jarvis.main --check` → schema v3, secret store available, voice
+    stack reported honestly, Ollama reachable, exit 0.
+  - A live conversation turn against `qwen3.5:9b-q4_K_M`: the model answered,
+    proposed a registered tool, the invoker ran it, and the reply came back
+    correctly labelled.
+  - Kokoro `bm_george` → 5.35s of audio; faster-whisper `small` transcribed that
+    audio back **exactly**. FR-034 redaction removed a key before synthesis.
 - **Not yet run:** GitHub Actions CI (workflow committed, never executed);
   Linux; Python 3.12; `pip-audit`.
 - **Known limitations:** no test requires Ollama, a microphone, a GPU or the
-  network, so nothing in the suite proves real-hardware audio behaviour. Phase 1
-  will need on-hardware verification that unit tests cannot provide. Coverage is
-  lowest in `jarvis/ui/app.py` (46%) and `single_instance.py` (61%, the
-  Windows-mutex branch is untested because the suite forces the lock-file path).
+  network, which is deliberate (ARCHITECTURE §11) but means the suite proves
+  nothing about real-hardware audio; the smoke runs above are what covers that,
+  and they are not automated. **Nothing has yet been tested with a real
+  microphone end to end** — capture, wake, VAD and barge-in are exercised
+  against synthetic frames only, and ADR-0028 is explicit that self-trigger
+  rates need real-hardware iteration. Coverage is lowest in `jarvis/ui/app.py`
+  and `single_instance.py`.
 
 ## Decisions Requiring Attention
 
@@ -165,38 +198,37 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Stage 1 — unblock.** Nothing beyond the two self-inspection grants can run
-until this exists.
+1. **Accept or reject ADR-0029.** Nothing in stage 4 may be written until this
+   is decided, and two of Phase 1's five exit criteria depend on it. The ADR
+   authorises exactly one `subprocess.Popen(argv_list, shell=False)` call site
+   under nine named constraints, and adds the single `ALLOW_LIST` entry that
+   `tests/security/test_no_shell.py` has always anticipated.
 
-1. **Approval dialog** (`ApprovalPort` → Qt, tray-anchored, non-modal) per
-   ADR-0027: the PRD §11.2 field set, the offered-scope table by risk, the
-   timeout-as-denied path, the "Don't ask again for this application / folder"
-   scoped `DENY`, tray `BLOCKED` while pending, and a keyboard route to a pending
-   request (NFR-030).
-2. **DPAPI secret store** per ADR-0030, with `tests/security/test_secret_store.py`
-   proving a secret never reaches plaintext configuration or the audit log.
-3. **Global hotkey infrastructure**: `Ctrl+Alt+Pause` emergency stop and F9
-   push-to-talk, both configurable, registered off the Qt thread, degrading
-   honestly when a hotkey is already owned by another process.
-4. **Startup-at-sign-in setting** (FR-002) and **`--require-healthy`** on
-   `jarvis.main`, each with a test.
+2. **Obtain the openWakeWord "Hey Jarvis" base model.** Everything around it is
+   built and reports its absence honestly, including the exact path it expects.
+   Record provider, licence, size and install location per PRD §17.2, then the
+   enrolment flow can be fitted on top: record samples → fit a personal
+   threshold → **measure** → only then offer always-listening (ADR-0016).
 
-**Stage 2 — converse.** Ollama chat restricted to structured tool calls,
-model-role routing, bounded multi-turn context, source labelling, tool-grounded
-success, conversation history with global and per-conversation disable, private
-session mode, and the live Conversation and Home screens.
+3. **Stage 4 — the six initial approved tools.** `media.playback_control`,
+   `device.control_volume`, `voice.speak` and `notify.show` need no new
+   security decision and can be built as soon as work resumes.
+   `app.open_approved` and `web.open_approved_url` wait on step 1.
 
-**Stage 3 — voice.** TTS first (Kokoro `bm_george`, lang `b`, 24 kHz), then STT
-(faster-whisper `small`, CPU, `int8`, `beam_size=1`, `vad_filter=True`), then
-capture with the in-memory ring buffer, VAD and full-duplex barge-in per
-ADR-0028, then the wake detector and per-user enrolment with measurement per
-ADR-0016. Settings port from `tools/voice-lab/`, which is verified on hardware.
+4. **Real-microphone verification.** ADR-0028 is explicit that self-trigger
+   rates are a tuning problem needing hardware iteration. The measurement hooks
+   exist (`DuplexCoordinator.measurement_summary`); the measurement has not been
+   taken, and barge-in must not be declared reliable until it has.
 
-**Stage 4 — act.** The six initial approved tools from PRD §21: open approved
-application, open approved website, media control, volume control, speak, notify.
-Blocked on item A above.
+5. **Wire the Voice screen's controls to the service.** The screen reports state
+   correctly and its signals exist; test meter, calibration and preview are not
+   yet connected to `VoiceService`.
 
-Phase 1 exit criteria are in `docs/BACKLOG.md` §4 and PRD §21.
+Phase 1 exit criteria are in `docs/BACKLOG.md` §4 and PRD §21. Of the five:
+"user can converse locally" is met for text; "no network is used in offline
+mode" holds and is tested; "stop listening and stop all automation" is met via
+tray, window and the global hotkey; the wake-phrase criterion needs the base
+model; and the application-launch criterion needs ADR-0029.
 
 ## Uncommitted or Temporary State
 Phase 1 work is in progress on `feat/PHASE-1-development`, branched from

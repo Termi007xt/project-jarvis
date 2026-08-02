@@ -652,11 +652,13 @@ producing a warning.
 
 ---
 
-## 12. What exists in Phase 0
+## 12. What exists today
 
-Phase 0 is foundation and safety architecture only. It contains **no
-computer-control capability whatsoever**: no audio capture, no automation, no
-browser, no filesystem tools, no screen capture, no clipboard access.
+Phase 0 was foundation and safety architecture only. Phase 1 stages 1–3 have
+since added the approval dialog, the secret store, conversation and the voice
+stack. There is still **no desktop or browser automation**: no filesystem tools,
+no screen capture, no clipboard access, and no application launching (the last
+of these is gated on ADR-0029, not merely unbuilt).
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -680,10 +682,17 @@ browser, no filesystem tools, no screen capture, no clipboard access.
 | Ollama health check | Implemented | loopback-only, offline-mode aware, timeout |
 | Single-instance guard | Implemented | named mutex, lock-file fallback |
 | Emergency stop | Implemented | cancels tasks, releases locks, reports what stopped |
-| PySide6 tray + main window | Implemented | seven states, PRD §9.2 menu, six live nav areas |
-| Approval port | Interface only | Phase 0 default denies; Qt dialog is Phase 1 |
-| Secret store | Not implemented | Phase 1, when the first secret exists (ADR-0008) |
-| Audio, automation, browser, vision, memory, skills | Not implemented | Phases 1–4 |
+| PySide6 tray + main window | Implemented | seven states, PRD §9.2 menu, nine live nav areas |
+| Approval dialog + queue | Implemented (Phase 1) | tray-anchored, non-modal, timeout-as-denied, scoped rememberable denials (ADR-0027) |
+| Secret store | Implemented (Phase 1) | DPAPI, unencrypted metadata beside the ciphertext (ADR-0030) |
+| Global hotkeys, start at sign-in | Implemented (Phase 1) | `RegisterHotKey` on its own message loop; per-user `Run` key, never elevated |
+| Conversation, model routing, grounding | Implemented (Phase 1) | structured tool calls only; five FR-047 source labels; FR-048 enforced on the way out |
+| History and private sessions | Implemented (Phase 1) | a private session writes nothing at all; `secure_delete` makes deletion real |
+| Personality profile and proposals | Implemented (Phase 1) | user-editable; a proposal changes nothing until accepted (§4.4) |
+| Voice: capture, ring buffer, VAD, STT, TTS, barge-in | Implemented (Phase 1) | optional `voice` extra, lazily imported; verified on this hardware |
+| Wake-word detection and enrolment | Not implemented | needs the openWakeWord base model (ADR-0016); push-to-talk is the route meanwhile |
+| Application launcher, browser, media, volume, notify tools | Not implemented | Phase 1 stage 4; the launcher is gated on ADR-0029 |
+| Automation, vision, memory, skills | Not implemented | Phases 2–4 |
 
 ---
 
@@ -697,15 +706,29 @@ contested ones have an ADR.
 2. **In-process isolation is not a security boundary.** In Phases 0–3 a defect in
    the automation worker can reach the vault. Process separation is deferred
    (ADR-0004).
-3. **The approval path has no UI yet**, so no capability requiring approval can
-   run. This is intentional for Phase 0 and is the first Phase 1 deliverable.
+3. ~~**The approval path has no UI yet.**~~ Closed in Phase 1: the dialog and its
+   queue exist (ADR-0027). The residual risk moved rather than disappearing — a
+   non-modal surface can be missed, so visibility now depends on the tray state,
+   the notification, the window list and the timeout all working.
 4. **Untrusted-content wrapping is specified but unexercised** — nothing produces
    untrusted content yet. The delimiter strategy needs adversarial testing when
    the first content source lands (Phase 2).
 5. **`ALWAYS` grants have no automatic review.** A low-risk always-allow granted
    once persists indefinitely; a periodic review prompt is a Phase 3 item.
-6. **Model-resource scheduling is configuration only.** Nothing enforces
-   `sequential` loading until models are actually loaded (Phase 1).
+6. **Model-resource scheduling was configuration only.** `ModelRouter.hold` now
+   refuses a second heavy role while one is held, so `sequential` is enforced
+   rather than declared. It is still not meaningfully exercised until Phase 4
+   adds the vision model, which is why the lease is deliberately simple.
+
+7. **Self-trigger rates for barge-in have not been measured** on real hardware.
+   ADR-0028 makes that measurement the gate on relying on barge-in, and the
+   hooks exist (`DuplexCoordinator.measurement_summary`), but the tuning
+   exercise has not been done. Until it is, push-to-talk is the dependable
+   interruption path.
+
+8. **No wake-word model is present.** Everything around detection is built and
+   reports its absence honestly. Obtaining the base model carries the PRD §17.2
+   disclosure obligations (provider, licence, size, install location).
 
 ---
 

@@ -4,10 +4,61 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — Phase 1: voice-first local assistant (stages 1–3)
 
-Nothing yet. Phase 1 (voice-first local assistant) has not started; it is
-awaiting review of Phase 0.
+Jarvis can now hold a conversation and has a voice. It still performs **no
+desktop or browser automation**, and it cannot yet launch an application —
+that is gated on ADR-0029 rather than merely unbuilt.
+
+### Added
+
+- **Approval dialog.** Consequential actions can finally be authorised, which
+  unblocks every capability beyond the two self-inspection grants. The prompt
+  is anchored to the tray and does **not** take focus, so being asked never
+  disturbs what you are doing. An unanswered request expires and is recorded as
+  denied — silence is never taken as consent. Denials can be remembered per
+  application, site or folder, and a waiting request is reachable from the tray
+  and the Permissions screen without a mouse.
+- **Local conversation.** A Conversation screen that talks to the local model.
+  Every reply says where it came from — the model itself, a retrieved fact, an
+  inference, a confirmed tool result, or an admission of uncertainty — and
+  Jarvis will not tell you something was done unless a tool confirmed it.
+- **Conversation history, with real controls.** History can be turned off
+  globally or for one conversation, and deleted. A **private session** writes
+  nothing to disk at all rather than writing and cleaning up afterwards.
+- **A voice.** Kokoro `bm_george` for speech, faster-whisper `small` for
+  listening, both running locally. Anything that looks like a password, key,
+  card number or verification code is replaced with a description of what it
+  was *before* Jarvis says it out loud.
+- **Push-to-talk on F9** and an emergency-stop hotkey on `Ctrl+Alt+Pause`, both
+  configurable. A combination another application already owns is reported as
+  unavailable rather than silently doing nothing.
+- **A Voice screen** showing which components are installed, which microphone is
+  selected, and each voice's licence. It states the wake phrase literally and
+  says plainly that single-word "Jarvis" is not available in this build.
+- **Protected secret storage** using the Windows Data Protection API.
+- **Start Jarvis at sign-in**, as a per-user setting that never needs
+  administrator rights.
+- **`--require-healthy`** for `--check`, when a caller needs an unreachable
+  model runtime to be a failure rather than an honest report.
+
+### Changed
+
+- Deleted conversation history is now genuinely erased from the database file.
+  Previously the rows were unlinked but their contents stayed readable in freed
+  pages.
+- The Home screen reports the voice stack, the secret store and the conversation
+  engine, and no longer describes the build as Phase 0.
+
+### Known limitations
+
+- **Wake-word detection is not active.** No "Hey Jarvis" model is installed, so
+  Jarvis is not listening for a wake phrase; push-to-talk is the way to speak to
+  it. Per-user enrolment is not built.
+- **Barge-in is unproven on real hardware.** Interrupting Jarvis mid-sentence is
+  implemented, but the rate at which it mistakes its own voice for yours has not
+  been measured, so it should not yet be relied upon.
+- **No application launching, media control, volume control or notifications.**
 
 ---
 
