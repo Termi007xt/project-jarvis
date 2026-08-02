@@ -3,11 +3,12 @@
 ## Snapshot
 - **Last updated:** 2026-08-02
 - **Current branch:** `feat/PHASE-1-development`
-- **HEAD commit:** `54c4d08` — Phase 1 stages 1–3 complete; working tree clean
-- **Active phase:** **Phase 1 — voice-first local assistant, stages 1–3 done, stage 4 blocked**
-- **Overall status:** Green. `python -m pytest` → **617 passed, 2 skipped**
-  (Phase 0 baseline was 386). One thing is blocked and it is named below:
-  stage 4 needs **ADR-0029 accepted** before any launcher code may be written.
+- **HEAD commit:** `f0f7279` — all four Phase 1 stages implemented; tree clean
+- **Active phase:** **Phase 1 — code complete, awaiting user acceptance testing**
+- **Overall status:** Green. `python -m pytest` → **698 passed, 2 skipped**
+  (Phase 0 baseline was 386). Nothing is blocked. Phase 1 is **not closed**:
+  the checks only a human can run are in `docs/PHASE-01-ACCEPTANCE-TESTING.md`,
+  and speaking to a real microphone is the largest untested area.
 
 ## Current Objective
 
