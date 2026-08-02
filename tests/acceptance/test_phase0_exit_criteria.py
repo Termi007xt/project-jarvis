@@ -228,13 +228,39 @@ def test_exit_6_no_prohibited_tool_can_be_registered(core) -> None:
         assert not check_tool_id(name)
 
 
-def test_exit_6_the_registered_tool_set_is_narrow_and_read_only(core: JarvisCore) -> None:
-    """Phase 0 registers exactly one tool, and it changes nothing."""
+def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
+    """The tool set stays small and low risk.
+
+    Phase 0 registered exactly one tool. Phase 1 adds the five PRD section 21
+    names plus ``notify.show``, which only a shell can back. The invariant that
+    still has to hold is not the count but the shape: everything registered is
+    **low risk**, and nothing has appeared that no phase asked for.
+    """
     specs = core.registry.specs()
-    assert [spec.tool_id for spec in specs] == ["system.health"]
+    registered = {spec.tool_id for spec in specs}
+
+    expected = {
+        "system.health",      # Phase 0
+        "app.open",           # Phase 1, PRD section 21
+        "web.open_url",
+        "media.control",
+        "device.volume",
+        "voice.speak",
+    }
+    assert registered == expected, (
+        "the registered tool set has drifted from what the phases declare"
+    )
     for spec in specs:
-        assert spec.changes_state is False
-        assert spec.risk is RiskLevel.LOW
+        assert spec.risk is RiskLevel.LOW, f"{spec.tool_id} is not low risk"
+
+
+def test_exit_6_a_state_changing_tool_must_declare_how_it_verifies(
+    core: JarvisCore,
+) -> None:
+    """PRD FR-048: succeeded requires verification, so it must be declared."""
+    for spec in core.registry.specs():
+        if spec.changes_state:
+            assert spec.verification, f"{spec.tool_id} changes state but declares no check"
 
 
 def test_exit_6_the_planner_is_offered_only_registered_tools(core: JarvisCore) -> None:

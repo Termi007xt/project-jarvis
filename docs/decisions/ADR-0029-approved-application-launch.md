@@ -1,6 +1,8 @@
 # ADR-0029: Launching approved applications — the one authorised process-creation call site
 
-- **Status:** **Proposed** — must be accepted before any launcher code is written
+- **Status:** **Accepted** (decided 2026-08-02 by the project owner, who directed
+  that the exception must not be broadened and no second process-creation call
+  site may be added)
 - **Date:** 2026-08-02
 - **Deciders:** Project owner
 - **PRD reference:** FR-060, FR-062, FR-063, FR-064, §21 (Phase 1 exit criteria), §13.3, AT-003

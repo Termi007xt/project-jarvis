@@ -111,3 +111,12 @@ Desktop.ini
 .DS_Store
 *.swp
 *.swo
+
+# Downloaded runtime models. NEVER committed (ADR-0016, PRD 17.2).
+# The openWakeWord pretrained models are CC BY-NC-SA 4.0 (non-commercial) and
+# are fetched to the user's own machine by an explicit action, not bundled.
+# Install:   python -m jarvis.main --install-wake-model
+# Remove:    python -m jarvis.main --uninstall-wake-model
+models/
+*.onnx
+*.tflite

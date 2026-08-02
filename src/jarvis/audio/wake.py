@@ -60,7 +60,14 @@ PHASE_1_PHRASE = "Hey Jarvis"
 DESIRED_PHRASE = "Jarvis"
 
 #: Score above which a frame counts as a detection, before playback gating.
-DEFAULT_THRESHOLD = 0.5
+#:
+#: 0.6 rather than the more usual 0.5, on measurement rather than taste. Against
+#: synthesised speech on this build, "Hey Jarvis" scored 0.994-0.998 while the
+#: near-miss "Hey Travis" scored 0.489 — only 0.011 below a 0.5 threshold. 0.6
+#: keeps every genuine utterance (the weakest was 0.994) and roughly doubles the
+#: margin against the closest confusable phrase. Per-user enrolment will refit
+#: this to the actual speaker (ADR-0016).
+DEFAULT_THRESHOLD = 0.6
 
 #: Fewer recordings than this cannot support a held-out measurement at all.
 MINIMUM_SAMPLES = 6
@@ -84,8 +91,14 @@ def phrase_disclosure(enrolled_phrase: str = PHASE_1_PHRASE) -> str:
 
 
 def wake_model_path(vault_root: Path) -> Path:
-    """Where the pretrained base model is expected to live (PRD section 17.2)."""
-    return vault_root / "models" / "wake" / "hey_jarvis_v0.1.onnx"
+    """Where the pretrained base model is expected to live (PRD section 17.2).
+
+    Installed by ``jarvis.audio.wake_install`` on explicit user action; never
+    bundled and never committed.
+    """
+    from jarvis.audio.wake_install import WAKE_MODEL_FILENAME, model_directory
+
+    return model_directory(vault_root) / WAKE_MODEL_FILENAME
 
 
 @dataclass(frozen=True)
@@ -229,15 +242,20 @@ class OpenWakeWordDetector:
 
     def __init__(
         self,
-        model_path: Path,
+        vault_root: Path,
         *,
         phrase: str = PHASE_1_PHRASE,
         threshold: float = DEFAULT_THRESHOLD,
     ) -> None:
-        self._model_path = model_path
+        self._vault_root = Path(vault_root)
+        self._model_path = wake_model_path(self._vault_root)
         self._phrase = phrase
         self._threshold = threshold
         self._model = None
+
+    @property
+    def model_path(self) -> Path:
+        return self._model_path
 
     @property
     def phrase(self) -> str:
@@ -253,17 +271,27 @@ class OpenWakeWordDetector:
 
     @property
     def available(self) -> bool:
-        return module_available("openwakeword") and self._model_path.exists()
+        from jarvis.audio.wake_install import missing_files
+
+        return module_available("openwakeword") and not missing_files(
+            self._vault_root
+        )
 
     def unavailable_reason(self) -> str | None:
+        from jarvis.audio.wake_install import missing_files
+
         if not module_available("openwakeword"):
             return f"openwakeword is not installed; {VOICE_EXTRA_HINT}"
-        if not self._model_path.exists():
-            # ADR-0016: no artefact ships with the product and none is present.
+        missing = missing_files(self._vault_root)
+        if missing:
+            # ADR-0016: no artefact ships with the product. Say what is missing
+            # and how to get it, rather than only that it is absent.
             return (
                 f'No "{self._phrase}" wake-word model is installed, so Jarvis is '
-                "not listening for a wake phrase. Push-to-talk still works. The "
-                f"model is expected at {self._model_path}."
+                "not listening for a wake phrase. Push-to-talk still works. "
+                f"Missing: {', '.join(missing)}. Install it with "
+                "`python -m jarvis.main --install-wake-model`, which downloads it "
+                f"to {self._model_path.parent}."
             )
         return None
 
@@ -277,8 +305,14 @@ class OpenWakeWordDetector:
             raise AudioUnavailable(reason)
         from openwakeword.model import Model  # noqa: PLC0415 - lazy by design
 
+        from jarvis.audio.wake_install import use_local_models
+
         _LOG.info("loading wake-word model from %s", self._model_path)
-        self._model = Model(wakeword_models=[str(self._model_path)])
+        # ONNX on Windows, and the vault's feature models: the library resolves
+        # its defaults relative to its own package directory.
+        self._model = Model(
+            wakeword_models=[str(self._model_path)], **use_local_models(self._vault_root)
+        )
 
     def reset(self) -> None:
         if self._model is not None and hasattr(self._model, "reset"):
@@ -321,7 +355,7 @@ def build_wake_detector(config: object, vault_root: Path) -> object:
         )
 
     detector = OpenWakeWordDetector(
-        wake_model_path(vault_root), phrase=settings.phrase or PHASE_1_PHRASE
+        vault_root, phrase=settings.phrase or PHASE_1_PHRASE
     )
     if detector.available:
         return detector

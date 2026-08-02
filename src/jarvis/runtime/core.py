@@ -59,6 +59,8 @@ from jarvis.tasks.recovery import (
 from jarvis.tasks.scheduler import TaskScheduler
 from jarvis.tasks.states import TaskState
 from jarvis.tasks.store import TaskStore
+from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
+from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
 from jarvis.toolbox.system_health import HealthCheckRunner, SystemHealthTool
 
 __all__ = ["JarvisCore", "CoreStatus", "EmergencyStopReport"]
@@ -150,6 +152,7 @@ class JarvisCore:
         self.personality: PersonalityStore
         self.conversation: ConversationEngine
         self.voice: VoiceService
+        self.applications: ApplicationCatalogue
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -264,8 +267,16 @@ class JarvisCore:
         # being absent (ADR-0010).
         self.voice = VoiceService(self.config, self.paths.root, audit=self.audit)
 
-        # 9. Phase 0 tools, runners and bootstrap grants
+        # 9. tools, runners and bootstrap grants
         self.registry.register(SystemHealthTool(self.config, self.paths))
+        self.applications = default_catalogue(self.config)
+        register_phase1_tools(
+            self.registry,
+            self.applications,
+            speak=self.voice.speak,
+            # ``notify`` needs a shell; the UI supplies it via attach_shell().
+            notify=None,
+        )
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
 
@@ -306,6 +317,18 @@ class JarvisCore:
             )
         )
         return self
+
+    def attach_shell(self, notify: object) -> str | None:
+        """Let the shell supply what only it can: desktop notifications.
+
+        ``notify.show`` is registered here rather than at start-up because
+        without a shell there is nothing to show a notification on, and a tool
+        that always fails looks like a defect rather than an absence (ADR-0010).
+        """
+        if self.registry.get(NotifyTool.spec.tool_id) is not None:
+            return None
+        self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
+        return NotifyTool.spec.tool_id
 
     def _build_conversation_engine(self) -> ConversationEngine:
         planner = self.models.resolve(ModelRole.CONVERSATION)

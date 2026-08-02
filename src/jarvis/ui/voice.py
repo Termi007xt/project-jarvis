@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from jarvis.audio.availability import VoiceStackStatus
 from jarvis.audio.wake import DESIRED_PHRASE, PHASE_1_PHRASE, phrase_disclosure
+from jarvis.audio.wake_install import LICENCE_WARNING
 
 __all__ = ["VoicePanel"]
 
@@ -44,6 +45,8 @@ class VoicePanel(QWidget):
     previewVoiceRequested = Signal(str)
     enrolRequested = Signal()
     alwaysListeningToggled = Signal(bool)
+    installModelRequested = Signal()
+    removeModelRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,6 +72,32 @@ class VoicePanel(QWidget):
         self.disclosure.setWordWrap(True)
         self.disclosure.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.disclosure)
+
+        # -- one-time model installation (ADR-0016, PRD §17.2) ------------
+        install_row = QHBoxLayout()
+        self.install_model_button = QPushButton("Install wake-word model")
+        self.install_model_button.setAccessibleName("Install the wake-word model")
+        self.install_model_button.clicked.connect(self.installModelRequested.emit)
+        install_row.addWidget(self.install_model_button)
+        self.remove_model_button = QPushButton("Remove wake-word model")
+        self.remove_model_button.setAccessibleName("Remove the wake-word model")
+        self.remove_model_button.clicked.connect(self.removeModelRequested.emit)
+        install_row.addWidget(self.remove_model_button)
+        install_row.addStretch(1)
+        layout.addLayout(install_row)
+
+        self.model_path_label = QLabel()
+        self.model_path_label.setWordWrap(True)
+        self.model_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.model_path_label.setStyleSheet("color: palette(mid);")
+        layout.addWidget(self.model_path_label)
+
+        self.licence_warning = QLabel(LICENCE_WARNING)
+        self.licence_warning.setWordWrap(True)
+        self.licence_warning.setStyleSheet("color: #b45309;")
+        layout.addWidget(self.licence_warning)
 
         enrolment_row = QHBoxLayout()
         self.enrol_button = QPushButton("Record wake-word samples")
@@ -148,6 +177,15 @@ class VoicePanel(QWidget):
         for control in (self.test_button, self.calibrate_button, self.enrol_button):
             control.setEnabled(installed)
         self.preview_button.setEnabled(status.text_to_speech.available)
+
+    def set_model_state(self, directory: object, installed: bool, detail: str) -> None:
+        """Always show the exact destination path, installed or not."""
+        state = "installed" if installed else "not installed"
+        self.model_path_label.setText(f"Wake-word model ({state}): {directory}\n{detail}")
+        self.install_model_button.setText(
+            "Reinstall wake-word model" if installed else "Install wake-word model"
+        )
+        self.remove_model_button.setEnabled(installed)
 
     def set_phrase(self, phrase: str, *, enrolled: bool) -> None:
         """State the phrase literally. Never label it 'Jarvis' (FR-011)."""

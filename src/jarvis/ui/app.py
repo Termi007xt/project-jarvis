@@ -64,6 +64,10 @@ class JarvisApplication(QObject):
         if core.approvals is not None:
             core.approvals.set_interactive(True)
 
+        # Only a shell can show a notification, so notify.show is registered
+        # now rather than at start-up (ADR-0010).
+        core.attach_shell(self._notify_from_tool)
+
         self.hotkeys = self._register_hotkeys()
 
         self._connect()
@@ -101,6 +105,8 @@ class JarvisApplication(QObject):
         self.window.conversationSendRequested.connect(self.send_message)
         self.window.privateSessionToggled.connect(self.set_private_session)
         self.window.historyClearRequested.connect(self.clear_history)
+        self.window.installWakeModelRequested.connect(self.install_wake_model)
+        self.window.removeWakeModelRequested.connect(self.remove_wake_model)
 
         self.bridge.eventReceived.connect(self._on_event)
 
@@ -296,6 +302,42 @@ class JarvisApplication(QObject):
         self.window.conversation_panel().append_note(
             f"Deleted {removed} conversation(s) from history."
         )
+
+    # -- wake-model bootstrap (ADR-0016, PRD 17.2) ------------------------
+    def install_wake_model(self) -> None:
+        """The GUI half of the one-time install. Downloads, then verifies."""
+        from jarvis.audio.wake_install import install_wake_model
+
+        panel = self.window.voice_panel()
+        panel.install_model_button.setEnabled(False)
+        panel.set_model_state(
+            self._core.paths.root / "models" / "wake", False, "Downloading…"
+        )
+        # Blocking, but bounded and user-initiated; the button is disabled
+        # meanwhile so it cannot be started twice.
+        report = install_wake_model(self._core.paths.root)
+        panel.install_model_button.setEnabled(True)
+        self.tray.notify("Wake-word model", report.describe())
+        self.window.refresh_voice()
+
+    def remove_wake_model(self) -> None:
+        from jarvis.audio.wake_install import uninstall_wake_model
+
+        removed, directory = uninstall_wake_model(self._core.paths.root)
+        self.tray.notify(
+            "Wake-word model",
+            f"Removed from {directory}." if removed else f"Nothing to remove in {directory}.",
+        )
+        self.window.refresh_voice()
+
+    def _notify_from_tool(self, title: str, message: str) -> bool:
+        """Backs the ``notify.show`` tool. Runs on whichever thread calls it."""
+        try:
+            QTimer.singleShot(0, lambda: self.tray.notify(title, message))
+        except Exception:  # noqa: BLE001 - the tool reports failure honestly
+            _LOG.exception("could not show a notification")
+            return False
+        return True
 
     # -- hotkeys (PRD 11.3, FR-018) ---------------------------------------
     def _register_hotkeys(self) -> GlobalHotkeys:

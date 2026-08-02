@@ -72,10 +72,21 @@ FORBIDDEN_WIN32_CALLS: frozenset[str] = frozenset(
     }
 )
 
-#: Explicitly allowed exceptions. Every entry must cite an ADR. Empty in Phase 0:
-#: nothing yet needs to start a process. Phase 1's approved-application launcher
-#: will add exactly one entry here, reviewed and recorded.
-ALLOW_LIST: dict[tuple[str, str], str] = {}
+#: Explicitly allowed exceptions. Every entry must cite an ADR.
+#:
+#: There is exactly **one**, and ``test_the_allow_list_holds_at_most_one_entry``
+#: keeps it that way, so a second exception cannot be added quietly alongside
+#: the first. ADR-0029 authorises this call site under nine constraints and is
+#: explicit that a second site is a new ADR, never another entry here.
+ALLOW_LIST: dict[tuple[str, str], str] = {
+    ("jarvis/toolbox/launch.py", "import subprocess"): (
+        "ADR-0029: the single authorised process-creation call site, used to "
+        "launch an application the user has already approved. List argv only, "
+        "shell=False, executable chosen from the catalogue and never from model "
+        "output, interpreters refused by basename, arguments typed per entry, "
+        "environment inherited, always through ToolInvoker, launch verified."
+    ),
+}
 
 
 def _relative(path: Path) -> str:
@@ -150,6 +161,41 @@ def test_no_process_creation_or_dynamic_evaluation_in_runtime(source_files: list
         "Found:\n  " + "\n  ".join(violations) + "\n\n"
         "Do not add these to ALLOW_LIST to make this pass. Remove the call, or "
         "raise an ADR that names the call site and its justification."
+    )
+
+
+def test_the_allow_list_holds_at_most_one_entry() -> None:
+    """ADR-0029 authorises one call site. A second is a new ADR, not a row here.
+
+    This is what stops "one reviewed exception" eroding into a list, which is
+    the failure mode ADR-0029 names in its Negative consequences.
+    """
+    assert len(ALLOW_LIST) <= 1, (
+        "Only one process-creation call site is authorised (ADR-0029). Adding "
+        "another requires a new ADR and a re-examination of that one — never a "
+        "second entry under its number.\n  " + "\n  ".join(
+            f"{module}: {finding}" for module, finding in ALLOW_LIST
+        )
+    )
+    for (module, finding), justification in ALLOW_LIST.items():
+        assert "ADR-" in justification, f"{module} ({finding}) cites no ADR"
+        assert module == "jarvis/toolbox/launch.py", (
+            f"the authorised call site is jarvis/toolbox/launch.py, not {module}"
+        )
+
+
+def test_the_authorised_call_site_still_exists_and_is_the_only_one(
+    source_files: list[Path],
+) -> None:
+    """The allow-list entry must describe reality, not a module that moved."""
+    importers = {
+        _relative(path)
+        for path in source_files
+        if any("subprocess" in finding for finding in _findings(path))
+    }
+    assert importers == {"jarvis/toolbox/launch.py"}, (
+        "exactly one module may import subprocess, and it is the one ADR-0029 "
+        f"names. Found: {sorted(importers)}"
     )
 
 

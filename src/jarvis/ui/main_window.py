@@ -286,6 +286,8 @@ class MainWindow(QMainWindow):
     conversationSendRequested = Signal(str)
     privateSessionToggled = Signal(bool)
     historyClearRequested = Signal()
+    installWakeModelRequested = Signal()
+    removeWakeModelRequested = Signal()
 
     def __init__(self, core: JarvisCore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -332,7 +334,10 @@ class MainWindow(QMainWindow):
         if area.key == "voice":
             from jarvis.ui.voice import VoicePanel
 
-            return VoicePanel()
+            panel = VoicePanel()
+            panel.installModelRequested.connect(self.installWakeModelRequested.emit)
+            panel.removeModelRequested.connect(self.removeWakeModelRequested.emit)
+            return panel
         if area.key == "conversation":
             from jarvis.ui.conversation import ConversationPanel
 
@@ -409,6 +414,24 @@ class MainWindow(QMainWindow):
         )
         panel.set_phrase(
             config.audio.wake_word.phrase, enrolled=config.audio.wake_word.enrolled
+        )
+
+        from jarvis.audio.wake_install import (
+            is_installed,
+            model_directory,
+            verify_detector_loads,
+        )
+
+        installed = is_installed(self._core.paths.root)
+        loads, error = verify_detector_loads(self._core.paths.root) if installed else (False, None)
+        panel.set_model_state(
+            model_directory(self._core.paths.root),
+            installed and loads,
+            (
+                "The detector initialises."
+                if loads
+                else (error or "Not installed. Push-to-talk works without it.")
+            ),
         )
 
         voice = getattr(self._core, "voice", None)
