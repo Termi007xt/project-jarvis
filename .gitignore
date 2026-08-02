@@ -1,29 +1,109 @@
-# Python
+# Python environments and caches
 .venv/
 **/.venv/
 __pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+.pyinstaller/
 
 # Local configuration
 .local/
 config/user.yaml
 
+# Local AI assets and downloaded models
+models/
+model-cache/
+huggingface/
+.huggingface/
+
 # Generated audio and diagnostics
 tools/voice-lab/output/
 *.wav
 
-# Runtime data
+# Runtime application data
 data/
+runtime-data/
 logs/
 temp/
+tmp/
 attachments/
 backups/
+crash-dumps/
 
 # IDE
 .vscode/
 .idea/
 
-# Secrets
+# Local environment and secrets
 .env
+.env.*
+!.env.example
 *.key
 *.pem
+*.pfx
+*.p12
+config/user.yaml
+config/local.yaml
+secrets/
+
+# Browser automation state
+browser-profile/
+browser-data/
+playwright/.auth/
+storage-state.json  
+
+# Generated voice and audio diagnostics
+tools/voice-lab/output/
+tools/qwen-tts-lab/output/
+audio-diagnostics/
+recordings/
+
+# Generated screen and task evidence
+screenshots/
+task-evidence/
+
+# Local Claude settings; keep project skills and shared settings
+.claude/settings.local.json
+.claude/*.local.json
+
+# Graphify: commit GRAPH_REPORT.md, graph.json, manifest.json and the community
+# labels — they are the shared repository map. Everything below is local-only or
+# regenerable from graph.json.
+graphify-out/cost.json
+graphify-out/cache/
+graphify-out/graph.html
+graphify-out/graph.svg
+graphify-out/graph.graphml
+graphify-out/cypher.txt
+graphify-out/obsidian/
+graphify-out/wiki/
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_chunk_*.json
+graphify-out/.graphify_detect.json
+graphify-out/.graphify_extract.json
+graphify-out/.graphify_ast.json
+graphify-out/.graphify_semantic*.json
+graphify-out/.graphify_analysis.json
+graphify-out/.graphify_cached.json
+graphify-out/.graphify_uncached.txt
+graphify-out/.needs_update
+
+# OS and editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*.swo

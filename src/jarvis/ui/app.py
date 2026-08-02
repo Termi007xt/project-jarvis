@@ -1,0 +1,197 @@
+"""The Qt application: wires the core to the tray and the main window.
+
+Everything here runs on the Qt main thread and does no work of its own. Domain
+events arrive through :class:`~jarvis.ui.qt_bridge.EventBridge`, already
+marshalled onto this thread.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from PySide6.QtCore import QObject, QTimer
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+
+from jarvis import APP_NAME
+from jarvis.config.schema import NetworkMode
+from jarvis.core.events.types import (
+    EmergencyStopCompleted,
+    Event,
+    HealthChecked,
+    NetworkModeChanged,
+    TaskStateChanged,
+)
+from jarvis.runtime.core import JarvisCore
+from jarvis.tasks.states import ACTIVE_STATES, TERMINAL_STATES, TaskState
+from jarvis.ui.icons import TrayState
+from jarvis.ui.main_window import MainWindow
+from jarvis.ui.qt_bridge import EventBridge
+from jarvis.ui.tray import JarvisTrayIcon
+
+__all__ = ["JarvisApplication"]
+
+_LOG = logging.getLogger(__name__)
+
+
+class JarvisApplication(QObject):
+    """Composition of core, tray and window."""
+
+    def __init__(self, core: JarvisCore, app: QApplication) -> None:
+        super().__init__()
+        self._core = core
+        self._app = app
+        self._app.setApplicationName(APP_NAME)
+        self._app.setQuitOnLastWindowClosed(False)  # PRD FR-001: live in the tray
+
+        self.window = MainWindow(core)
+        self.tray = JarvisTrayIcon(self)
+        self.bridge = EventBridge(core.events, self)
+
+        self._connect()
+        self.tray.set_network_mode(core.config.network.mode)
+        self._apply_state()
+
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray.show()
+        else:
+            _LOG.warning("no system tray is available; showing the main window instead")
+            self.window.show()
+
+        # Refresh the window periodically so task and audit views stay current
+        # without every event forcing a repaint.
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(2000)
+        self._refresh_timer.timeout.connect(self._refresh_if_visible)
+        self._refresh_timer.start()
+
+    # -- wiring ------------------------------------------------------------
+    def _connect(self) -> None:
+        self.tray.openRequested.connect(self.show_window)
+        self.tray.settingsRequested.connect(lambda: self.show_window("developer"))
+        self.tray.quitRequested.connect(self.quit)
+        self.tray.emergencyStopRequested.connect(self.emergency_stop)
+        self.tray.offlineModeToggled.connect(self.set_offline_mode)
+        self.tray.pauseRequested.connect(self._pause_current)
+        self.tray.resumeRequested.connect(self._resume_current)
+        self.tray.cancelRequested.connect(self._cancel_current)
+
+        self.window.emergencyStopRequested.connect(self.emergency_stop)
+        self.window.healthCheckRequested.connect(self._run_health_check)
+
+        self.bridge.eventReceived.connect(self._on_event)
+
+    # -- event handling ----------------------------------------------------
+    def _on_event(self, event: Event) -> None:
+        """Runs on the Qt main thread, courtesy of the bridge."""
+        if isinstance(event, TaskStateChanged):
+            self._apply_state()
+            self.window.refresh_tasks()
+        elif isinstance(event, HealthChecked):
+            self._apply_state()
+            self.window.refresh_home()
+            self.window.refresh_models()
+        elif isinstance(event, NetworkModeChanged):
+            self.tray.set_network_mode(NetworkMode(event.current))
+            self._apply_state()
+        elif isinstance(event, EmergencyStopCompleted):
+            self.tray.notify(
+                "Automation stopped",
+                f"Cancelled {len(event.cancelled_task_ids)} task(s), released "
+                f"{len(event.released_locks)} lock(s), stopped "
+                f"{len(event.stopped_workers)} worker(s).",
+            )
+            self._apply_state()
+
+    def _apply_state(self) -> None:
+        """Derive the tray state from what the runtime is actually doing."""
+        config = self._core.config
+        if config.network.mode is NetworkMode.OFFLINE:
+            state, detail = TrayState.OFFLINE, "Offline mode"
+        else:
+            state, detail = TrayState.IDLE, "Phase 0: no voice or automation yet"
+
+        current = self._current_task()
+        if current is not None:
+            if current.state is TaskState.RUNNING:
+                state, detail = TrayState.ACTING, current.name
+            elif current.state in (TaskState.QUEUED, TaskState.WAITING):
+                state, detail = TrayState.WAITING, current.waiting_on or current.name
+            elif current.state in (TaskState.PAUSED, TaskState.AWAITING_APPROVAL):
+                state, detail = TrayState.WAITING, f"{current.name} ({current.state.value})"
+            elif current.state is TaskState.BLOCKED:
+                state, detail = TrayState.BLOCKED, current.blocked_reason or current.name
+
+        health = self._core.last_health
+        if health is not None and not health.reachable and not health.skipped:
+            state, detail = TrayState.BLOCKED, "Local model runtime unreachable"
+
+        self.tray.set_state(state, detail)
+        self.tray.set_current_task(
+            current.task_id if current else None,
+            current.name if current else "",
+            current.state if current else None,
+        )
+
+    def _current_task(self):
+        candidates = self._core.tasks.list(
+            [
+                TaskState.RUNNING,
+                TaskState.WAITING,
+                TaskState.QUEUED,
+                TaskState.PAUSED,
+                TaskState.BLOCKED,
+                TaskState.AWAITING_APPROVAL,
+            ],
+            limit=1,
+        )
+        return candidates[0] if candidates else None
+
+    def _refresh_if_visible(self) -> None:
+        if self.window.isVisible():
+            self.window.refresh_all()
+
+    # -- actions -----------------------------------------------------------
+    def show_window(self, area: str | None = None) -> None:
+        if area:
+            self.window.show_area(area)
+        self.window.show()
+        self.window.raise_()
+        self.window.activateWindow()
+        self.window.refresh_all()
+
+    def emergency_stop(self) -> None:
+        report = self._core.emergency_stop(origin="tray")
+        _LOG.info("emergency stop: %s", report.describe())
+
+    def set_offline_mode(self, offline: bool) -> None:
+        mode = NetworkMode.OFFLINE if offline else NetworkMode.LOCAL_ASSISTANT
+        if self._core.config.network.mode is mode:
+            return
+        self._core.set_network_mode(mode)
+        self._apply_state()
+        self.window.refresh_all()
+
+    def _run_health_check(self) -> None:
+        self._core.run_health_check_task()
+
+    def _pause_current(self) -> None:
+        task_id = self.tray.current_task_id
+        if task_id:
+            self._core.scheduler.pause(task_id)
+
+    def _resume_current(self) -> None:
+        task_id = self.tray.current_task_id
+        if task_id:
+            self._core.scheduler.resume(task_id)
+
+    def _cancel_current(self) -> None:
+        task_id = self.tray.current_task_id
+        if task_id:
+            self._core.scheduler.cancel(task_id)
+
+    def quit(self) -> None:
+        self._refresh_timer.stop()
+        self.bridge.detach()
+        self.tray.hide()
+        self._core.shutdown("quit from the tray menu")
+        self._app.quit()

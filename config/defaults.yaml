@@ -1,7 +1,28 @@
+# Shipped defaults. Do not edit for personal preferences: user overrides live in
+# %LOCALAPPDATA%\ProjectJarvis\config\user.yaml and only record the difference
+# from this file (ADR-0006).
+#
+# Every key here must exist in jarvis.config.schema. Unknown keys are a startup
+# error, not a silently ignored value.
+
 schema_version: 1
 
 runtime:
   required_python: ">=3.11,<3.13"
+  single_instance: true
+
+network:
+  # offline          - no network request is made by any component
+  # local_assistant  - local model only; network tools available when invoked
+  # connected        - optional configured search or cloud providers available
+  mode: local_assistant
+
+llm:
+  ollama:
+    base_url: "http://127.0.0.1:11434"
+    request_timeout_seconds: 10.0
+    health_check_interval_seconds: 300
+    require_loopback: true
 
 models:
   planner:
@@ -96,6 +117,33 @@ audio:
     spoken_output:
       default_language: English
 
+permissions:
+  # Fallback decision when no grant matches, per risk level.
+  # High risk is always "ask" and cannot be configured otherwise (PRD 11.1).
+  default_policy:
+    low: ask
+    medium: ask
+    high: ask
+  session_grant_ttl_seconds: 3600
+  allow_always_for_low_risk: true
+
+tasks:
+  max_concurrent: 2
+  default_max_retries: 3
+  lock_acquire_timeout_seconds: 0.0
+  scheduler_poll_interval_seconds: 0.1
+  step_timeout_seconds: 120.0
+
+logging:
+  level: INFO
+  audit_to_sqlite: true
+  max_audit_value_chars: 512
+
+ui:
+  start_minimised_to_tray: true
+  show_unavailable_features: true
+  emergency_stop_hotkey: "Ctrl+Alt+Pause"
+
 storage:
   huggingface_home: "%LOCALAPPDATA%\\ProjectJarvis\\models\\huggingface"
   application_data: "%LOCALAPPDATA%\\ProjectJarvis"
@@ -105,3 +153,4 @@ privacy:
   raw_audio_retention: disabled
   generated_voice_retention: temporary
   screenshot_retention: task_only
+  telemetry_enabled: false

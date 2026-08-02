@@ -1,0 +1,56 @@
+# Do not graph Graphify's own generated output
+graphify-out/
+
+# Local agent and runtime output
+runtime-data/
+logs/
+temp/
+tmp/
+attachments/
+backups/
+crash-dumps/
+screenshots/
+task-evidence/
+audio-diagnostics/
+recordings/
+
+# Downloaded models and browser state
+models/
+model-cache/
+huggingface/
+browser-profile/
+browser-data/
+playwright/.auth/
+
+# Development environments and generated builds
+.venv/
+**/.venv/
+build/
+dist/
+*.egg-info/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+**/__pycache__/
+
+# Vendored virtual environments. These are not named .venv, so the patterns
+# above do not catch them. Indexing site-packages would add thousands of
+# third-party files and drown the real architecture in the graph.
+tools/qwen-tts-lab/qwen_tts_clean/
+**/site-packages/
+**/Lib/site-packages/
+
+# Research spikes: exploratory voice scripts, not product runtime. They are
+# outside jarvis/ and are not covered by the security policy (SECURITY.md).
+tools/voice-lab/output/
+tools/qwen-tts-lab/output/
+*.wav
+
+# Secrets and machine-specific configuration
+.env
+.env.*
+config/user.yaml
+config/local.yaml
+secrets/
