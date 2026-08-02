@@ -42,6 +42,7 @@ from jarvis.llm.history import Conversation, ConversationStore
 from jarvis.llm.ollama.chat import OllamaChatProvider
 from jarvis.llm.ollama.health import OllamaHealth, OllamaHealthChecker
 from jarvis.llm.personality import PersonalityStore
+from jarvis.llm.ports import ModelRole
 from jarvis.llm.routing import ModelRouter
 from jarvis.runtime.single_instance import SingleInstanceGuard
 from jarvis.runtime.workers import PeriodicWorker, WorkerSupervisor
@@ -447,6 +448,13 @@ class JarvisCore:
         self.events.publish(
             ConfigChanged(source="core", key_path=key_path, previous=previous, current=value)
         )
+        # The chat provider captured the network mode and the model name when it
+        # was built, so a settings change has to rebuild it. Otherwise switching
+        # to offline mode would leave a provider that still opens sockets.
+        if self._started and key_path.startswith(("network.", "models.", "llm.")):
+            self.models.update(self.config)
+            self.conversation = self._build_conversation_engine()
+
         if key_path == "network.mode":
             self.events.publish(
                 NetworkModeChanged(source="core", previous=str(previous), current=str(value))

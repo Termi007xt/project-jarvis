@@ -58,11 +58,14 @@ SUCCESS_PHRASES: tuple[str, ...] = (
     r"\bi(?:'ve| have)? (?:opened|launched|started|closed|sent|deleted|created|saved|played)\b",
     r"\bis now (?:open|running|playing|closed|paused|muted)\b",
     r"\bhas been (?:opened|launched|started|closed|sent|deleted|created|saved)\b",
-    r"\b(?:done|all set|that'?s done|completed successfully)\b",
+    # "Done." as a whole statement, not the word "done" inside a sentence such
+    # as "the wrong thing to have done". Anchored to a sentence boundary, since
+    # the bare word is far too common to treat as a completion claim.
+    r"(?:^|[.!?]\s+|\n)(?:done|all set|that'?s done|completed successfully)\b[.!\s]*$",
     r"\bsuccessfully \w+ed\b",
 )
 
-_SUCCESS_PATTERN = re.compile("|".join(SUCCESS_PHRASES), re.IGNORECASE)
+_SUCCESS_PATTERN = re.compile("|".join(SUCCESS_PHRASES), re.IGNORECASE | re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,13 @@ def claims_completion(text: str) -> bool:
     return bool(_SUCCESS_PATTERN.search(text or ""))
 
 
+def _verification_of(result: object) -> str:
+    """The verification value of a succeeded result; empty if it did not succeed."""
+    if not getattr(result, "succeeded", False):
+        return ""
+    return str(getattr(getattr(result, "verification", None), "value", ""))
+
+
 def review_response(
     text: str,
     *,
@@ -110,27 +120,33 @@ def review_response(
 ) -> GroundingReview:
     """Label a reply and stop it claiming an unverified success.
 
-    ``tool_results`` are ``ToolResult`` objects from the invoker. A result
-    counts as verification only when it both succeeded *and* verified — the two
-    are separate outcomes precisely so this distinction can be made (PRD FR-048,
-    AT-018).
+    ``tool_results`` are ``ToolResult`` objects from the invoker. Two different
+    questions are asked of them, and conflating the two is the mistake this
+    function exists to avoid:
+
+    * **What is the source?** A succeeded read-only tool reports
+      ``not_applicable`` — nothing changed, so there was nothing to verify — and
+      what it returned is still a real observation, not a guess. It counts as a
+      tool result for FR-047 labelling.
+    * **May the reply claim an action happened?** Only a ``verified`` result
+      supports that. A read-only tool cannot confirm that anything was done, so
+      ``not_applicable`` never licenses a success claim (FR-048, AT-018).
     """
-    verified = any(
-        getattr(result, "succeeded", False)
-        and getattr(getattr(result, "verification", None), "value", "") == "verified"
-        for result in tool_results
+    verified = any(_verification_of(result) == "verified" for result in tool_results)
+    observed = any(
+        _verification_of(result) in ("verified", "not_applicable") for result in tool_results
     )
     ran_a_tool = bool(tool_results)
 
     if uncertain:
         label = SourceLabel.UNCERTAINTY
-    elif verified:
+    elif observed:
         label = SourceLabel.TOOL_RESULT
     elif retrieved:
         label = SourceLabel.RETRIEVED_FACT
     elif ran_a_tool:
-        # A tool ran but could not confirm its effect. That is not a tool
-        # result in the FR-047 sense; it is at best an inference.
+        # A state-changing tool ran and could not confirm its effect. That is
+        # not a tool result in the FR-047 sense; it is at best an inference.
         label = SourceLabel.INFERENCE
     else:
         label = SourceLabel.MODEL_ANSWER

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QThread, QTimer
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from jarvis import APP_NAME
@@ -27,6 +27,7 @@ from jarvis.runtime.core import JarvisCore
 from jarvis.runtime.hotkeys import GlobalHotkeys
 from jarvis.tasks.states import TaskState
 from jarvis.ui.approval import ApprovalController
+from jarvis.ui.conversation import ConversationWorker
 from jarvis.ui.icons import TrayState
 from jarvis.ui.main_window import MainWindow
 from jarvis.ui.qt_bridge import EventBridge
@@ -53,6 +54,9 @@ class JarvisApplication(QObject):
         #: Set by the voice controller in stage 3. Until then push-to-talk says
         #: plainly that the stack is not ready rather than doing nothing.
         self.voice: object | None = None
+        self._conversation = None
+        self._conversation_thread: QThread | None = None
+        self._private_session = False
 
         # The approval surface exists, so the engine may now ask. Until this
         # line runs, the queue denies everything (ADR-0010).
@@ -94,6 +98,9 @@ class JarvisApplication(QObject):
         self.window.emergencyStopRequested.connect(self.emergency_stop)
         self.window.healthCheckRequested.connect(self._run_health_check)
         self.window.approvalAnswered.connect(self._on_window_approval)
+        self.window.conversationSendRequested.connect(self.send_message)
+        self.window.privateSessionToggled.connect(self.set_private_session)
+        self.window.historyClearRequested.connect(self.clear_history)
 
         self.bridge.eventReceived.connect(self._on_event)
 
@@ -218,6 +225,77 @@ class JarvisApplication(QObject):
         self._refresh_approvals()
         if self.window.isVisible():
             self.window.refresh_all()
+
+    # -- conversation (PRD 9.5, FR-045, FR-046) ---------------------------
+    def _ensure_conversation(self):
+        """One live conversation at a time, created on first use."""
+        if self._conversation is None:
+            self._conversation = self._core.start_conversation(
+                private=self._private_session
+            )
+        return self._conversation
+
+    def send_message(self, text: str) -> None:
+        """Run one turn on a worker thread; the model call blocks."""
+        panel = self.window.conversation_panel()
+        engine = self._core.conversation
+        if not engine.available:
+            panel.append_error(engine.unavailable_reason() or "the model is unavailable")
+            return
+
+        panel.append_user(text)
+        panel.set_busy(True)
+
+        conversation = self._ensure_conversation()
+        thread = QThread(self)
+        worker = ConversationWorker(engine, conversation, text)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_turn_finished)
+        worker.failed.connect(self._on_turn_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._conversation_thread = thread
+        thread.start()
+
+    def _on_turn_finished(self, turn: object) -> None:
+        panel = self.window.conversation_panel()
+        panel.set_busy(False)
+        if not getattr(turn, "ok", False):
+            panel.append_error(getattr(turn, "error", "") or "no answer")
+        else:
+            panel.append_reply(turn.reply, turn.label)  # type: ignore[attr-defined]
+            for refusal in getattr(turn, "refused_proposals", ()):
+                panel.append_note(refusal)
+            review = getattr(turn, "review", None)
+            if review is not None and review.amended:
+                panel.append_note(review.note or "")
+        self.window.refresh_conversation()
+
+    def _on_turn_failed(self, message: str) -> None:
+        panel = self.window.conversation_panel()
+        panel.set_busy(False)
+        panel.append_error(message)
+
+    def set_private_session(self, private: bool) -> None:
+        """Switching mid-conversation ends the current one (PRD FR-046)."""
+        self._private_session = private
+        if self._conversation is not None:
+            self._core.history.end(self._conversation.conversation_id)
+            self._conversation = None
+        panel = self.window.conversation_panel()
+        panel.clear_transcript()
+        panel.set_private(private)
+        if not private:
+            panel.append_note("History is being recorded again.")
+
+    def clear_history(self) -> None:
+        removed = self._core.history.delete_all()
+        self.window.conversation_panel().append_note(
+            f"Deleted {removed} conversation(s) from history."
+        )
 
     # -- hotkeys (PRD 11.3, FR-018) ---------------------------------------
     def _register_hotkeys(self) -> GlobalHotkeys:

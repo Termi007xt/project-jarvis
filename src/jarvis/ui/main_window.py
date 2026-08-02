@@ -46,8 +46,7 @@ class NavArea:
 #: PRD section 9.3, in order. ``live`` means the panel shows real runtime data.
 NAV_AREAS: tuple[NavArea, ...] = (
     NavArea("home", "Home", 0, True),
-    NavArea("conversation", "Conversation", 1, False,
-            "Voice and text conversation with the local model."),
+    NavArea("conversation", "Conversation", 1, True),
     NavArea("tasks", "Tasks", 0, True),
     NavArea("skills", "Skills", 3, False, "Recorded and editable reusable workflows."),
     NavArea("memory", "Memory", 3, False, "Reviewable memories and memory candidates."),
@@ -284,6 +283,9 @@ class MainWindow(QMainWindow):
     emergencyStopRequested = Signal()
     healthCheckRequested = Signal()
     approvalAnswered = Signal(str, bool)
+    conversationSendRequested = Signal(str)
+    privateSessionToggled = Signal(bool)
+    historyClearRequested = Signal()
 
     def __init__(self, core: JarvisCore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -327,6 +329,14 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(panel)
 
     def _live_panel(self, area: NavArea) -> QWidget:
+        if area.key == "conversation":
+            from jarvis.ui.conversation import ConversationPanel
+
+            panel = ConversationPanel(self._core)
+            panel.sendRequested.connect(self.conversationSendRequested.emit)
+            panel.privateSessionToggled.connect(self.privateSessionToggled.emit)
+            panel.historyCleared.connect(self.historyClearRequested.emit)
+            return panel
         if area.key == "home":
             panel = _TextPanel("Home")
             panel.refreshRequested.connect(self.refresh_all)
@@ -373,12 +383,21 @@ class MainWindow(QMainWindow):
     # -- refresh -----------------------------------------------------------
     def refresh_all(self) -> None:
         self.refresh_home()
+        self.refresh_conversation()
         self.refresh_tasks()
         self.refresh_permissions()
         self.refresh_audit()
         self.refresh_models()
         self.refresh_developer()
         self.refresh_about()
+
+    def refresh_conversation(self) -> None:
+        panel = self.conversation_panel()
+        engine = getattr(self._core, "conversation", None)
+        if engine is None:
+            panel.set_availability(False, "The conversation engine is not running.")
+            return
+        panel.set_availability(engine.available, engine.unavailable_reason())
 
     def refresh_home(self) -> None:
         status = self._core.status()
@@ -398,10 +417,33 @@ class MainWindow(QMainWindow):
             "",
             f"Local model runtime    {health.describe() if health else 'not checked yet'}",
             f"Startup recovery       {recovery.describe() if recovery else 'not run'}",
+        ]
+
+        secrets = getattr(self._core, "secrets", None)
+        if secrets is not None:
+            lines.append(
+                f"Protected secrets      "
+                f"{'available' if secrets.available else secrets.unavailable_reason()}"
+            )
+
+        engine = getattr(self._core, "conversation", None)
+        if engine is not None:
+            lines.append(
+                f"Conversation           "
+                f"{'ready' if engine.available else (engine.unavailable_reason() or 'unavailable')}"
+            )
+
+        from jarvis.audio.availability import describe_voice_stack
+
+        voice = describe_voice_stack(self._core.config)
+        lines += ["", "Voice stack", "-----------"]
+        lines += [f"  {component.describe()}" for component in voice.components]
+
+        lines += [
             "",
-            "Phase 0 has no voice, no automation, no browser control and no filesystem",
-            "tools. It is the foundation: configuration, storage, events, audit,",
-            "permissions, the tool pipeline and the task state machine.",
+            "Phase 1 adds voice and conversation. It performs no desktop or browser",
+            "automation beyond opening an approved application or URL, and has no",
+            "filesystem tools, screen capture or clipboard access.",
         ]
         self._text("home").set_text("\n".join(lines))
 
@@ -567,6 +609,13 @@ class MainWindow(QMainWindow):
     def _permissions_panel(self) -> _PermissionsPanel:
         panel = self._panels["permissions"]
         assert isinstance(panel, _PermissionsPanel)
+        return panel
+
+    def conversation_panel(self):
+        from jarvis.ui.conversation import ConversationPanel
+
+        panel = self._panels["conversation"]
+        assert isinstance(panel, ConversationPanel)
         return panel
 
     def show_area(self, key: str) -> None:

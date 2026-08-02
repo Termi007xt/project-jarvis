@@ -63,6 +63,11 @@ class Database:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA synchronous = NORMAL")
+        # Without this, DELETE only unlinks a row: its bytes stay in free pages
+        # until something happens to overwrite them, so deleted conversation
+        # history and deleted memories remain readable in the file. "Deleted"
+        # has to mean gone (PRD FR-045, FR-167, AT-013, AT-014).
+        connection.execute("PRAGMA secure_delete = ON")
         connection.execute("PRAGMA busy_timeout = %d" % int(self._timeout * 1000))
         self._local.connection = connection
         with self._connections_lock:

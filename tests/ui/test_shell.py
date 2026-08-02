@@ -194,8 +194,10 @@ def test_every_unimplemented_area_shows_an_honest_panel(window: MainWindow) -> N
 
 
 def test_the_live_areas_are_the_six_phase_0_screens_plus_home(window: MainWindow) -> None:
+    """Phase 1 adds Conversation. Everything else still names its phase."""
     assert set(window.live_area_keys()) == {
-        "home", "tasks", "permissions", "models", "audit", "developer", "about",
+        "home", "conversation", "tasks", "permissions", "models", "audit",
+        "developer", "about",
     }
 
 
