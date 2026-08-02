@@ -53,7 +53,7 @@ NAV_AREAS: tuple[NavArea, ...] = (
     NavArea("applications", "Applications", 2, False,
             "The application catalogue, aliases and launch verification."),
     NavArea("models", "Models", 0, True),
-    NavArea("voice", "Voice", 1, False, "Voice selection, preview, rate and volume."),
+    NavArea("voice", "Voice", 1, True),
     NavArea("permissions", "Permissions", 0, True),
     NavArea("integrations", "Integrations", 6, False,
             "Optional external providers, configured with your own keys."),
@@ -329,6 +329,10 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(panel)
 
     def _live_panel(self, area: NavArea) -> QWidget:
+        if area.key == "voice":
+            from jarvis.ui.voice import VoicePanel
+
+            return VoicePanel()
         if area.key == "conversation":
             from jarvis.ui.conversation import ConversationPanel
 
@@ -384,12 +388,52 @@ class MainWindow(QMainWindow):
     def refresh_all(self) -> None:
         self.refresh_home()
         self.refresh_conversation()
+        self.refresh_voice()
         self.refresh_tasks()
         self.refresh_permissions()
         self.refresh_audit()
         self.refresh_models()
         self.refresh_developer()
         self.refresh_about()
+
+    def refresh_voice(self) -> None:
+        """Report the voice stack exactly as it is (ADR-0010, FR-011)."""
+        from jarvis.audio.availability import describe_voice_stack
+        from jarvis.audio.capture import list_devices
+        from jarvis.audio.wake import wake_model_path
+
+        panel = self.voice_panel()
+        config = self._core.config
+        panel.set_stack_status(
+            describe_voice_stack(config, wake_model_path(self._core.paths.root))
+        )
+        panel.set_phrase(
+            config.audio.wake_word.phrase, enrolled=config.audio.wake_word.enrolled
+        )
+
+        voice = getattr(self._core, "voice", None)
+        if voice is not None:
+            panel.set_voices(tuple(voice.tts.voices()))
+            panel.set_duplex(voice.pipeline.duplex.describe_mode())
+            panel.set_enrolment(
+                voice.enrolment_summary(),
+                passed=voice.enrolment_passed,
+                enrolled=config.audio.wake_word.enrolled,
+            )
+        else:
+            panel.set_enrolment(
+                "The voice stack is not running, so no enrolment has been measured.",
+                passed=False,
+                enrolled=False,
+            )
+        panel.set_devices(list_devices(inputs_only=True))
+
+    def voice_panel(self):
+        from jarvis.ui.voice import VoicePanel
+
+        panel = self._panels["voice"]
+        assert isinstance(panel, VoicePanel)
+        return panel
 
     def refresh_conversation(self) -> None:
         panel = self.conversation_panel()

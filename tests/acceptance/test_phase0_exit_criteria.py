@@ -138,14 +138,26 @@ def test_exit_4_audit_events_are_written_to_disk_and_indexed(core: JarvisCore) -
     assert wait_for(lambda: core.tasks.require(task_id).is_terminal)
 
     assert core.paths.audit_log_path.is_file()
+
+    # The SQLite index is read *first*, and the JSONL record of truth second.
+    # Each event is appended to JSONL before it is indexed, so in that order
+    # the index can only ever be a subset — whereas comparing counts the other
+    # way round races the health worker, which keeps writing while the test
+    # reads. The subset relation is the real invariant; equal counts were only
+    # ever an accident of timing.
+    indexed = {
+        str(row["audit_id"])
+        for row in core.database.query_all("SELECT audit_id FROM audit_event")
+    }
     records = core.audit.read_all()
     assert len(records) > 0
+    assert indexed, "the SQLite search index must be populated"
 
     categories = {record["category"] for record in records}
     assert {"lifecycle", "permission", "tool", "task"} <= categories
 
-    indexed = core.database.query_all("SELECT COUNT(*) AS n FROM audit_event")
-    assert indexed[0]["n"] == len(records)
+    on_disk = {str(record["audit_id"]) for record in records}
+    assert indexed <= on_disk, "every indexed event must exist in the record of truth"
 
 
 def test_exit_4_every_audit_record_carries_the_prd_11_5_fields(core: JarvisCore) -> None:

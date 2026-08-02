@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from jarvis import APP_VERSION
+from jarvis.audio.service import VoiceService
 from jarvis.common import new_id
 from jarvis.config.paths import VaultPaths
 from jarvis.config.schema import AppConfig, NetworkMode
@@ -148,6 +149,7 @@ class JarvisCore:
         self.history: ConversationStore
         self.personality: PersonalityStore
         self.conversation: ConversationEngine
+        self.voice: VoiceService
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -256,6 +258,11 @@ class JarvisCore:
         self.personality = PersonalityStore(self.database, self.audit)
         self.personality.ensure_default()
         self.conversation = self._build_conversation_engine()
+
+        # 8c. voice (Phase 1). Constructed whatever is installed, so the Voice
+        # screen reports each component's real state rather than the feature
+        # being absent (ADR-0010).
+        self.voice = VoiceService(self.config, self.paths.root, audit=self.audit)
 
         # 9. Phase 0 tools, runners and bootstrap grants
         self.registry.register(SystemHealthTool(self.config, self.paths))
@@ -371,6 +378,11 @@ class JarvisCore:
 
         if self.approvals is not None:
             self.approvals.set_interactive(False)
+        # The microphone closes before anything else, so the recording
+        # indicator can never outlive the capture it describes (FR-013).
+        voice = getattr(self, "voice", None)
+        if voice is not None:
+            voice.shutdown()
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)

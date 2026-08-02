@@ -264,10 +264,46 @@ CREATE INDEX ix_personality_proposal_status ON personality_proposal (status);
 """
 
 
+_M003_WAKE_ENROLMENT = """
+-- Wake-word enrolment (ADR-0016). One row per enrolment attempt, keeping the
+-- measurement that decided whether always-listening could be enabled. Criterion
+-- 1 is explicit that "we trained a model" without a measurement does not count,
+-- so the measurement is stored, not just the verdict.
+--
+-- Recordings are personal data (criterion 3): they live under the vault as
+-- files, are listed in the Voice screen, are deletable, and are excluded from
+-- normal exports. Only their paths are recorded here.
+CREATE TABLE wake_enrolment (
+    enrolment_id     TEXT PRIMARY KEY,
+    phrase           TEXT NOT NULL,
+    threshold        REAL NOT NULL,
+    sample_count     INTEGER NOT NULL,
+    true_accept_rate REAL NOT NULL,
+    false_accept_rate REAL NOT NULL,
+    passed           INTEGER NOT NULL,
+    active           INTEGER NOT NULL DEFAULT 0,
+    measured_summary TEXT NOT NULL,
+    created_at       TEXT NOT NULL
+);
+CREATE INDEX ix_wake_enrolment_active ON wake_enrolment (active);
+
+CREATE TABLE wake_enrolment_sample (
+    sample_id    TEXT PRIMARY KEY,
+    enrolment_id TEXT NOT NULL REFERENCES wake_enrolment (enrolment_id) ON DELETE CASCADE,
+    path         TEXT NOT NULL,
+    score        REAL,
+    held_out     INTEGER NOT NULL DEFAULT 0,
+    recorded_at  TEXT NOT NULL
+);
+CREATE INDEX ix_wake_enrolment_sample_enrolment ON wake_enrolment_sample (enrolment_id);
+"""
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, name="phase0_foundation", sql=_M001_FOUNDATION),
     Migration(version=2, name="phase1_secrets_and_conversation",
               sql=_M002_SECRETS_AND_CONVERSATION),
+    Migration(version=3, name="phase1_wake_enrolment", sql=_M003_WAKE_ENROLMENT),
 )
 
 SCHEMA_VERSION = MIGRATIONS[-1].version
