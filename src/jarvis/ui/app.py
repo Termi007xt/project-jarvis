@@ -15,6 +15,8 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from jarvis import APP_NAME
 from jarvis.config.schema import NetworkMode
 from jarvis.core.events.types import (
+    ApprovalRequested,
+    ApprovalResolved,
     EmergencyStopCompleted,
     Event,
     HealthChecked,
@@ -23,6 +25,7 @@ from jarvis.core.events.types import (
 )
 from jarvis.runtime.core import JarvisCore
 from jarvis.tasks.states import ACTIVE_STATES, TERMINAL_STATES, TaskState
+from jarvis.ui.approval import ApprovalController
 from jarvis.ui.icons import TrayState
 from jarvis.ui.main_window import MainWindow
 from jarvis.ui.qt_bridge import EventBridge
@@ -46,6 +49,12 @@ class JarvisApplication(QObject):
         self.window = MainWindow(core)
         self.tray = JarvisTrayIcon(self)
         self.bridge = EventBridge(core.events, self)
+
+        # The approval surface exists, so the engine may now ask. Until this
+        # line runs, the queue denies everything (ADR-0010).
+        self.approvals = ApprovalController(core.approvals, core, self) if core.approvals else None
+        if core.approvals is not None:
+            core.approvals.set_interactive(True)
 
         self._connect()
         self.tray.set_network_mode(core.config.network.mode)
@@ -74,9 +83,11 @@ class JarvisApplication(QObject):
         self.tray.pauseRequested.connect(self._pause_current)
         self.tray.resumeRequested.connect(self._resume_current)
         self.tray.cancelRequested.connect(self._cancel_current)
+        self.tray.reviewApprovalRequested.connect(self.review_pending_approval)
 
         self.window.emergencyStopRequested.connect(self.emergency_stop)
         self.window.healthCheckRequested.connect(self._run_health_check)
+        self.window.approvalAnswered.connect(self._on_window_approval)
 
         self.bridge.eventReceived.connect(self._on_event)
 
@@ -100,7 +111,50 @@ class JarvisApplication(QObject):
                 f"{len(event.released_locks)} lock(s), stopped "
                 f"{len(event.stopped_workers)} worker(s).",
             )
+            self._refresh_approvals()
             self._apply_state()
+        elif isinstance(event, ApprovalRequested):
+            # Impossible to miss is the requirement a non-modal surface has to
+            # earn: panel, red tray, notification and a window entry.
+            self.tray.notify(
+                "Jarvis needs your decision",
+                f"{event.action_summary} ({event.risk} risk). "
+                "Unanswered requests are denied.",
+            )
+            self._refresh_approvals()
+            self._apply_state()
+        elif isinstance(event, ApprovalResolved):
+            self._refresh_approvals()
+            self._apply_state()
+            self.window.refresh_permissions()
+
+    def _refresh_approvals(self) -> None:
+        pending = self._core.approvals.pending() if self._core.approvals else ()
+        if self.approvals is not None:
+            self.approvals.refresh()
+        self.tray.set_pending_approvals(len(pending))
+        self.window.set_pending_approvals(pending)
+
+    def review_pending_approval(self) -> bool:
+        """The keyboard route to a waiting request (PRD NFR-030)."""
+        if self.approvals is not None and self.approvals.focus_panel():
+            return True
+        self.show_window("permissions")
+        return False
+
+    def _on_window_approval(self, approval_id: str, allow: bool) -> None:
+        """Answered from the Permissions screen rather than the panel."""
+        queue = self._core.approvals
+        if queue is None:
+            return
+        from jarvis.core.permissions.models import Decision, GrantScope
+
+        queue.answer(
+            approval_id,
+            Decision.ALLOW if allow else Decision.DENY,
+            scope=GrantScope.ONCE,
+        )
+        self._refresh_approvals()
 
     def _apply_state(self) -> None:
         """Derive the tray state from what the runtime is actually doing."""
@@ -108,7 +162,7 @@ class JarvisApplication(QObject):
         if config.network.mode is NetworkMode.OFFLINE:
             state, detail = TrayState.OFFLINE, "Offline mode"
         else:
-            state, detail = TrayState.IDLE, "Phase 0: no voice or automation yet"
+            state, detail = TrayState.IDLE, "Phase 1: voice and conversation"
 
         current = self._current_task()
         if current is not None:
@@ -124,6 +178,12 @@ class JarvisApplication(QObject):
         health = self._core.last_health
         if health is not None and not health.reachable and not health.skipped:
             state, detail = TrayState.BLOCKED, "Local model runtime unreachable"
+
+        # Last, so it outranks everything: a pending approval is the one state
+        # the user must notice, and the tray is how a non-modal surface earns
+        # that (ADR-0027).
+        if self._core.approvals is not None and self._core.approvals.has_pending:
+            state, detail = TrayState.BLOCKED, "Waiting for your approval"
 
         self.tray.set_state(state, detail)
         self.tray.set_current_task(
@@ -147,6 +207,9 @@ class JarvisApplication(QObject):
         return candidates[0] if candidates else None
 
     def _refresh_if_visible(self) -> None:
+        # Approvals refresh regardless of window visibility: a request can
+        # expire while the window is closed, and the tray must still be right.
+        self._refresh_approvals()
         if self.window.isVisible():
             self.window.refresh_all()
 
@@ -192,6 +255,8 @@ class JarvisApplication(QObject):
     def quit(self) -> None:
         self._refresh_timer.stop()
         self.bridge.detach()
+        if self.approvals is not None:
+            self.approvals.panel.hide()
         self.tray.hide()
         self._core.shutdown("quit from the tray menu")
         self._app.quit()

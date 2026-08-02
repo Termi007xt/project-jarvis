@@ -32,8 +32,9 @@ from jarvis.core.events.types import (
 )
 from jarvis.core.permissions.engine import DefaultPolicy, PermissionEngine
 from jarvis.core.permissions.models import Decision, GrantScope
+from jarvis.core.tools.approvals import DEFAULT_APPROVAL_TIMEOUT_SECONDS, ApprovalQueue
 from jarvis.core.tools.invoker import ToolCall, ToolInvoker
-from jarvis.core.tools.ports import ApprovalPort, DenyingApprovalPort
+from jarvis.core.tools.ports import ApprovalPort
 from jarvis.core.tools.registry import ToolRegistry
 from jarvis.llm.ollama.health import OllamaHealth, OllamaHealthChecker
 from jarvis.runtime.single_instance import SingleInstanceGuard
@@ -64,13 +65,17 @@ class EmergencyStopReport:
     cancelled_task_ids: tuple[str, ...]
     released_locks: tuple[str, ...]
     stopped_workers: tuple[str, ...]
+    denied_approvals: int = 0
 
     def describe(self) -> str:
-        return (
+        text = (
             f"Stopped: {len(self.cancelled_task_ids)} task(s), "
             f"{len(self.released_locks)} resource lock(s), "
             f"{len(self.stopped_workers)} worker(s)."
         )
+        if self.denied_approvals:
+            text += f" Denied {self.denied_approvals} pending approval(s)."
+        return text
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,7 @@ class JarvisCore:
         *,
         config_store: ConfigStore | None = None,
         approvals: ApprovalPort | None = None,
+        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         single_instance: SingleInstanceGuard | None = None,
         enforce_single_instance: bool = True,
         session_id: str | None = None,
@@ -107,7 +113,11 @@ class JarvisCore:
         self.session_id = session_id or new_id()
 
         self._config_store = config_store or ConfigStore(self.paths)
-        self._approvals = approvals or DenyingApprovalPort()
+        # An injected port replaces the queue entirely (tests do this). Otherwise
+        # the core owns a queue, which denies until a UI declares itself
+        # connected — silence is never consent (ADR-0010).
+        self._injected_approvals = approvals
+        self._approval_timeout_seconds = approval_timeout_seconds
         self._enforce_single_instance = enforce_single_instance
         self._guard = single_instance or SingleInstanceGuard(
             lock_file=self.paths.runtime_dir / "single-instance.lock",
@@ -125,6 +135,7 @@ class JarvisCore:
         self.audit: AuditLog
         self.permissions: PermissionEngine
         self.registry: ToolRegistry
+        self.approvals: ApprovalQueue | None = None
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -173,6 +184,19 @@ class JarvisCore:
         )
         self.registry = ToolRegistry(self.audit, self.events)
 
+        # 6b. the approval surface's queue (ADR-0027). It denies everything
+        # until a user interface calls set_interactive(True).
+        approval_port: ApprovalPort
+        if self._injected_approvals is None:
+            self.approvals = ApprovalQueue(
+                audit=self.audit,
+                event_bus=self.events,
+                timeout_seconds=self._approval_timeout_seconds,
+            )
+            approval_port = self.approvals
+        else:
+            approval_port = self._injected_approvals
+
         # 7. tasks and locks
         self.tasks = TaskStore(self.database, self.audit, self.events, self.instance_id)
         self.locks = ResourceLockManager(
@@ -183,7 +207,7 @@ class JarvisCore:
             self.permissions,
             self.audit,
             locks=self.locks,
-            approvals=self._approvals,
+            approvals=approval_port,
             event_bus=self.events,
             database=self.database,
         )
@@ -290,6 +314,8 @@ class JarvisCore:
 
         self.events.publish(AppStopping(source="core", instance_id=self.instance_id, reason=reason))
 
+        if self.approvals is not None:
+            self.approvals.set_interactive(False)
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)
@@ -322,11 +348,15 @@ class JarvisCore:
         cancelled = self.scheduler.emergency_stop()
         released = self.locks.release_all_for_instance()
         stopped_workers = self.workers.stop_all(timeout_seconds=2.0)
+        # A request still on screen would otherwise authorise work into a
+        # runtime that has just been told to stop.
+        denied = self.approvals.deny_all("emergency stop") if self.approvals else 0
 
         report = EmergencyStopReport(
             cancelled_task_ids=cancelled,
             released_locks=released,
             stopped_workers=stopped_workers,
+            denied_approvals=denied,
         )
         self.audit.record(
             AuditCategory.SECURITY,

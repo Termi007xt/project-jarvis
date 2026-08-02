@@ -111,6 +111,10 @@ class PermissionEngine:
     def policy(self) -> DefaultPolicy:
         return self._policy
 
+    def capability(self, capability_id: str) -> Capability | None:
+        """The catalogue entry, or ``None`` if it is not a declared capability."""
+        return self._catalogue.get(capability_id)
+
     # -- evaluation --------------------------------------------------------
     def evaluate(self, request: PermissionRequest) -> PermissionEvaluation:
         with self._lock:

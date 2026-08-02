@@ -217,7 +217,7 @@ def test_the_tasks_panel_lists_real_tasks(window: MainWindow, core) -> None:
 
 def test_the_permissions_panel_lists_active_grants(window: MainWindow, core) -> None:
     window.refresh_permissions()
-    table = window._table("permissions").table  # noqa: SLF001
+    table = window._permissions_panel().table  # noqa: SLF001
     capabilities = {table.item(row, 0).text() for row in range(table.rowCount())}
     assert "system.read_health" in capabilities
 

@@ -269,6 +269,123 @@ def test_high_risk_approval_offers_only_a_single_use(registry, permissions, audi
     inv.shutdown(wait=False)
 
 
+def test_the_offered_scopes_follow_the_adr_0027_table(
+    registry, permissions, audit, locks, events, database
+) -> None:
+    """Low may be always, medium may be per-task, high is single use only."""
+    from jarvis.core.tools.invoker import ToolInvoker
+
+    port = AutoApprovalPort(decision=Decision.DENY)
+    inv = ToolInvoker(registry, permissions, audit, locks=locks, approvals=port,
+                      event_bus=events, database=database)
+    registry.register(make_tool(tool_id="test.low", capabilities=("notify.show",)))
+    registry.register(
+        make_tool(tool_id="test.medium", risk=RiskLevel.MEDIUM, capabilities=("clipboard.read",))
+    )
+
+    inv.invoke(ToolCall(tool_id="test.low"))
+    assert port.requests[-1].offerable_scopes == (GrantScope.ONCE, GrantScope.ALWAYS)
+
+    inv.invoke(ToolCall(tool_id="test.medium"))
+    assert port.requests[-1].offerable_scopes == (GrantScope.ONCE, GrantScope.TASK)
+
+    for request in port.requests:
+        assert GrantScope.SESSION not in request.offerable_scopes
+    inv.shutdown(wait=False)
+
+
+def test_a_scoped_capability_offers_to_remember_the_denial(
+    registry, permissions, audit, locks, events, database
+) -> None:
+    from jarvis.core.tools.invoker import ToolInvoker
+
+    port = AutoApprovalPort(decision=Decision.DENY)
+    inv = ToolInvoker(registry, permissions, audit, locks=locks, approvals=port,
+                      event_bus=events, database=database)
+    registry.register(
+        make_tool(
+            tool_id="test.scoped_deny",
+            risk=RiskLevel.MEDIUM,
+            capabilities=("fs.read_approved",),
+            target_parameter="target",
+        )
+    )
+    inv.invoke(ToolCall(tool_id="test.scoped_deny", parameters={"target": "C:/notes"}))
+    options = port.requests[-1].denial_options
+    assert len(options) == 1
+    assert options[0].scope is GrantScope.FOLDER
+    assert options[0].scope_ref == "C:/notes"
+    inv.shutdown(wait=False)
+
+
+def test_a_remembered_denial_stops_jarvis_asking_again(
+    registry, permissions, audit, locks, events, database, tmp_path
+) -> None:
+    """ADR-0027: a refusal the user asked to be remembered has to stick."""
+    from jarvis.core.tools.approvals import ApprovalQueue
+    from jarvis.core.tools.invoker import ToolInvoker
+    from jarvis.core.tools.ports import RememberDenialOption
+
+    folder = str(tmp_path / "notes")
+
+    class RememberingPort:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def request_approval(self, request):
+            self.requests.append(request)
+            return ApprovalOutcome(
+                decision=Decision.DENY,
+                reason="not this folder",
+                remember_denial=request.denial_options[0],
+            )
+
+    port = RememberingPort()
+    inv = ToolInvoker(registry, permissions, audit, locks=locks, approvals=port,
+                      event_bus=events, database=database)
+    registry.register(
+        make_tool(
+            tool_id="test.remembered",
+            risk=RiskLevel.MEDIUM,
+            capabilities=("fs.read_approved",),
+            target_parameter="target",
+        )
+    )
+
+    first = inv.invoke(ToolCall(tool_id="test.remembered", parameters={"target": folder}))
+    assert first.outcome is ToolOutcome.DENIED
+    assert len(port.requests) == 1
+
+    second = inv.invoke(ToolCall(tool_id="test.remembered", parameters={"target": folder}))
+    assert second.outcome is ToolOutcome.DENIED
+    assert len(port.requests) == 1, "the remembered denial should prevent a second prompt"
+    assert "denied by grant" in second.message
+
+    assert ApprovalQueue and RememberDenialOption  # imported for the reader's benefit
+    inv.shutdown(wait=False)
+
+
+def test_a_timed_out_approval_denies_the_invocation(
+    registry, permissions, audit, locks, events, database
+) -> None:
+    """End to end: nobody answers, and the tool does not run."""
+    from jarvis.core.tools.approvals import ApprovalQueue
+    from jarvis.core.tools.invoker import ToolInvoker
+
+    queue = ApprovalQueue(audit=audit, event_bus=events, timeout_seconds=0.2)
+    queue.set_interactive(True)
+    inv = ToolInvoker(registry, permissions, audit, locks=locks, approvals=queue,
+                      event_bus=events, database=database)
+    tool = make_tool(tool_id="test.ignored", risk=RiskLevel.MEDIUM,
+                     capabilities=("clipboard.read",))
+    registry.register(tool)
+
+    result = inv.invoke(ToolCall(tool_id="test.ignored"))
+    assert result.outcome is ToolOutcome.DENIED
+    assert tool.calls == 0
+    inv.shutdown(wait=False)
+
+
 def test_a_broader_approval_scope_is_persisted_as_a_grant(
     registry, permissions, audit, locks, events, database
 ) -> None:

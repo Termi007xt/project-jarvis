@@ -47,7 +47,14 @@ from jarvis.core.tools.contract import (
     ToolSpec,
     Verification,
 )
-from jarvis.core.tools.ports import ApprovalPort, ApprovalRequest, DenyingApprovalPort, LockPort
+from jarvis.core.tools.ports import (
+    ApprovalPort,
+    ApprovalRequest,
+    DenyingApprovalPort,
+    LockPort,
+    denial_options_for,
+    offerable_scopes_for,
+)
 from jarvis.storage.database import Database
 
 __all__ = ["ToolInvoker", "ToolCall"]
@@ -197,6 +204,7 @@ class ToolInvoker:
                     )
                 )
                 if not outcome.allowed:
+                    self._persist_denial(capability_id, outcome, call)
                     return self._denied(
                         invocation_id,
                         call,
@@ -226,14 +234,16 @@ class ToolInvoker:
         parameters: BaseModel,
         target: str | None,
     ) -> ApprovalRequest:
-        # PRD 9.9 and 11.1: high risk may only ever be approved once.
-        offerable = (
-            (GrantScope.ONCE,)
-            if risk is RiskLevel.HIGH
-            else (GrantScope.ONCE, GrantScope.TASK, GrantScope.SESSION)
+        # The offered-scope table is ADR-0027's, and high risk offering only
+        # single use is PRD 9.9 and 11.1, not a UX preference.
+        capability = self._permissions.capability(capability_id)
+        offerable = offerable_scopes_for(
+            risk,
+            allow_always_for_low_risk=self._permissions.policy.allow_always_for_low_risk,
         )
         return ApprovalRequest(
             capability_id=capability_id,
+            capability_title=capability.title if capability else capability_id,
             risk=risk,
             tool_id=spec.tool_id,
             action_summary=spec.description,
@@ -247,7 +257,37 @@ class ToolInvoker:
             rollback_method=spec.rollback.method if spec.rollback else None,
             task_id=call.task_id,
             offerable_scopes=offerable,
+            denial_options=denial_options_for(capability, target),
         )
+
+    def _persist_denial(self, capability_id: str, outcome: Any, call: ToolCall) -> None:
+        """Make "don't ask again" stick, as a scoped DENY grant (ADR-0027).
+
+        No engine change is needed: a deny-grant already outranks allow-grants
+        and short-circuits the high-risk ASK path, so the user is not re-asked.
+        """
+        option = getattr(outcome, "remember_denial", None)
+        if option is None:
+            return
+        try:
+            self._permissions.grant(
+                capability_id,
+                Decision.DENY,
+                option.scope,
+                scope_ref=option.scope_ref,
+                session_id=call.session_id,
+                task_id=call.task_id,
+                created_by="user",
+                reason=f"user chose '{option.label}' in the approval dialog",
+            )
+        except JarvisPermissionError as exc:
+            self._audit.record(
+                AuditCategory.SECURITY,
+                f"could not remember the denial of {capability_id}",
+                actor="user",
+                capability_id=capability_id,
+                error=str(exc),
+            )
 
     def _persist_approval(
         self,

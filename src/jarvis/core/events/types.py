@@ -30,6 +30,8 @@ __all__ = [
     "ToolInvocationStarted",
     "ToolInvocationFinished",
     "ProhibitedCapabilityBlocked",
+    "ApprovalRequested",
+    "ApprovalResolved",
     "TaskCreated",
     "TaskStateChanged",
     "TaskCheckpointSaved",
@@ -137,6 +139,33 @@ class ProhibitedCapabilityBlocked(Event):
     identifier: str
     origin: str
     detail: str
+
+
+# -- approvals (ADR-0027) --------------------------------------------------
+class ApprovalRequested(Event):
+    """A tool is waiting on the user. The tray must make this impossible to miss.
+
+    Carries no parameter values: the request itself is held by the approval
+    queue, and only redacted fields are ever displayed from there.
+    """
+
+    approval_id: str
+    capability_id: str
+    risk: str
+    tool_id: str
+    action_summary: str
+    expires_at: datetime
+    task_id: str | None = None
+
+
+class ApprovalResolved(Event):
+    approval_id: str
+    capability_id: str
+    decision: str
+    scope: str
+    timed_out: bool = False
+    remembered_denial_scope: str | None = None
+    task_id: str | None = None
 
 
 # -- tasks -----------------------------------------------------------------
