@@ -27,14 +27,14 @@ voice is only useful once there is something to talk to.
 |---|---|---|---|
 | 1 — Unblock | Approval dialog, DPAPI secret store, global hotkeys, startup-at-sign-in, `--require-healthy` | P1-SEC-01, P1-SEC-02, P1-UI-02, P1-COR-03 | **Done** |
 | 2 — Converse | Ollama chat with structured tool calls, model routing, bounded context, source labelling, tool-grounded success, history and private session, Conversation screen | P1-LLM-01…03, P1-COR-01, P1-COR-02, P1-MEM-01…03, P1-UI-01 | **Done** |
-| 3 — Voice | TTS (Kokoro), STT (faster-whisper), capture, ring buffer, VAD, full-duplex barge-in, wake detector and the Voice screen | P1-AUD-01…09 | **Done except wake enrolment**, which needs the base model (item B) |
-| 4 — Act | The six initial approved tools: open application, open URL, media control, volume control, speak, notify | P1-APP-01, P1-BRW-01, P1-WIN-01, P1-UI-03 | **Not started — blocked on ADR-0029** |
+| 3 — Voice | TTS (Kokoro), STT (faster-whisper), capture, ring buffer, VAD, full-duplex barge-in, wake detector and the Voice screen | P1-AUD-01…09 | **Done except per-user enrolment**, which is deferred; the shipped threshold is a measured default |
+| 4 — Act | The six approved tools plus the one-time wake-model bootstrap | P1-APP-01, P1-BRW-01, P1-WIN-01, P1-UI-03 | **Done** |
 
 **Delivery mode decided 2026-08-02:** continuous run to the end of the phase, no
-intermediate approval checkpoints. Two exceptions are unavoidable and are named
-in "Decisions Requiring Attention" below: ADR-0029 must be accepted before any
-launcher code is written, and the wake-word base model must be obtained before
-stage 3's wake detector can be built.
+intermediate approval checkpoints. Both blocking items were resolved during the
+phase: **ADR-0029 was accepted** (with the direction that the exception must not
+be broadened), and the **wake-word model was installed** through openWakeWord's
+official API, measured, and documented.
 
 ### Deliberately deferred out of Phase 1
 
@@ -67,8 +67,8 @@ Confirmed by passing tests or direct observation:
 
 Phase 0 is complete and closed. See `docs/phase-reports/PHASE-00-FOUNDATION.md`.
 
-**Phase 1 stages 1–3 are implemented, tested and committed.** Highlights that
-change what the product can do:
+**All four Phase 1 stages are implemented, tested and committed.** Highlights
+that change what the product can do:
 
 - **The approval dialog exists**, so capabilities beyond the two self-inspection
   grants can finally run. Tray-anchored and non-modal (ADR-0027), timing out as
@@ -85,36 +85,38 @@ change what the product can do:
   exactly. Redaction removed a key before synthesis. Six input devices enumerate.
 - **Storage now uses `PRAGMA secure_delete`.** Deleted conversation history was
   previously still readable in the database file.
+- **Six approved tools exist**, on the single process-creation call site
+  ADR-0029 authorises. Brave, YouTube, YouTube Music, Xbox and Sea of Thieves
+  are catalogued; interpreters, unapproved applications and non-http URLs are
+  all refused; a launch is only `succeeded` once the process is observed.
+- **The wake-word model installs in one command** and is measured: "Hey Jarvis"
+  scores 0.994–0.998, bare "Jarvis" 0.268–0.464 and is not detected — which
+  confirms FR-011 empirically rather than by assertion.
 
 ## In Progress
 
-Nothing is part-built. Stage 4 has not been started because it is blocked.
+Nothing is part-built. The phase is code complete and awaiting user acceptance
+testing — see `docs/PHASE-01-ACCEPTANCE-TESTING.md`.
 
 ## Blocked or Failing
-No test is failing. Three things discovered on 2026-08-02 that the Phase 0
-handoff did not record, each of which gates part of Phase 1:
 
-1. **Process creation is denied build-wide, so the application launcher cannot
-   be written yet.** `tests/security/test_no_shell.py` forbids `subprocess`,
-   `os.startfile`, `ShellExecute*`, `CreateProcess*` and `multiprocessing`, and
-   its `ALLOW_LIST` is empty. On Windows there is no way to launch Brave, Xbox or
-   Sea of Thieves without one of them, so Phase 1 exit criterion 3 depends on
-   **ADR-0029** being accepted first. The test file anticipated exactly this.
-2. **The project virtual environment contains no audio stack.** `.venv` holds
-   only PySide6, pydantic, PyYAML and pytest. faster-whisper, Kokoro, torch,
-   sounddevice, soundfile and onnxruntime exist only in `tools/voice-lab/.venv`,
-   which is a research spike outside the product runtime. Decided 2026-08-02:
-   they enter as an **optional `voice` extra with lazy imports**, so CI, Linux
-   and the hardware-free test rule in ARCHITECTURE §11 all still hold, and a
-   missing provider produces an honest degraded state (ADR-0010, NFR-014).
-3. **`openwakeword` is installed nowhere and no wake-word artefact exists.**
-   Stage 3 cannot build a detector until the pretrained "Hey Jarvis" base model
-   is obtained and its provider, licence, size and install location are recorded
-   per PRD §17.2. Consistent with ADR-0016; restated here because it is a
-   concrete acquisition task with a network download, not a code task.
+Nothing is blocked and no test is failing. The three items recorded here earlier
+in the phase have all been resolved: ADR-0029 was accepted, the audio stack was
+installed as the optional `voice` extra, and the wake-word model was obtained.
+
+**What is unproven rather than blocked** — the distinction matters:
+
+1. **Nobody has spoken into a real microphone.** Wake detection, VAD and
+   barge-in are exercised against synthetic frames and synthesised speech only.
+2. **Barge-in self-trigger rate is unmeasured**, which ADR-0028 makes the gate
+   on relying on it. The honest half-duplex fallback is implemented for if it
+   proves unreliable.
+3. **The Xbox and Sea of Thieves AUMIDs are unverified.** They build the correct
+   broker vector, but launching them would open windows on the user's desktop,
+   so it belongs in acceptance testing.
 
 ## Tests and Quality Checks
-- **Last successful:** `python -m pytest` → **617 passed, 2 skipped** (2026-08-02).
+- **Last successful:** `python -m pytest` → **698 passed, 2 skipped** (2026-08-02).
   The two skips are the non-Windows branches of the secret store, which cannot
   run on this platform by definition.
 - **Last failed:** none.
@@ -199,37 +201,38 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-1. **Accept or reject ADR-0029.** Nothing in stage 4 may be written until this
-   is decided, and two of Phase 1's five exit criteria depend on it. The ADR
-   authorises exactly one `subprocess.Popen(argv_list, shell=False)` call site
-   under nine named constraints, and adds the single `ALLOW_LIST` entry that
-   `tests/security/test_no_shell.py` has always anticipated.
+1. **User acceptance testing.** `docs/PHASE-01-ACCEPTANCE-TESTING.md` is the
+   script: what to run, what to expect, what to report, and where imperfection
+   is expected rather than a defect. **Phase 2 does not start until this is
+   done.** The five that matter most: the `--check` block, source labelling and
+   honest refusal, whether the approval prompt steals keyboard focus, whether
+   the five named applications actually open, and the four wake-word counts.
 
-2. **Obtain the openWakeWord "Hey Jarvis" base model.** Everything around it is
-   built and reports its absence honestly, including the exact path it expects.
-   Record provider, licence, size and install location per PRD §17.2, then the
-   enrolment flow can be fitted on top: record samples → fit a personal
-   threshold → **measure** → only then offer always-listening (ADR-0016).
+2. **Act on the wake-word counts.** They decide whether always-listening can be
+   enabled at all, and what threshold it uses. The shipped 0.6 is a measured
+   default from synthesised speech, not a personal one.
 
-3. **Stage 4 — the six initial approved tools.** `media.playback_control`,
-   `device.control_volume`, `voice.speak` and `notify.show` need no new
-   security decision and can be built as soon as work resumes.
-   `app.open_approved` and `web.open_approved_url` wait on step 1.
+3. **Measure barge-in self-triggering.** ADR-0028 makes this the gate on
+   relying on barge-in. If the rate is unacceptable, degrade to half-duplex and
+   say so in the GUI — that path is implemented, not assumed unnecessary.
 
-4. **Real-microphone verification.** ADR-0028 is explicit that self-trigger
-   rates are a tuning problem needing hardware iteration. The measurement hooks
-   exist (`DuplexCoordinator.measurement_summary`); the measurement has not been
-   taken, and barge-in must not be declared reliable until it has.
+4. **Join the voice loop end to end.** Speech-in and speech-out both work
+   independently; nothing yet wires microphone → transcript → planner → spoken
+   reply as one continuous path.
 
 5. **Wire the Voice screen's controls to the service.** The screen reports state
    correctly and its signals exist; test meter, calibration and preview are not
    yet connected to `VoiceService`.
 
+6. **Per-user wake enrolment (ADR-0016 Path 1).** The measurement types,
+   threshold fitting and quality bar exist and are tested; the recording flow
+   and the personal verifier do not.
+
 Phase 1 exit criteria are in `docs/BACKLOG.md` §4 and PRD §21. Of the five:
-"user can converse locally" is met for text; "no network is used in offline
-mode" holds and is tested; "stop listening and stop all automation" is met via
-tray, window and the global hotkey; the wake-phrase criterion needs the base
-model; and the application-launch criterion needs ADR-0029.
+"no network in offline mode" and "stop listening and stop all automation" are
+met and tested; "converse locally" is met for text; and the wake-phrase and
+application-launch criteria are **built and unit-verified but not yet proven by
+a human**, which is exactly what acceptance testing settles.
 
 ## Uncommitted or Temporary State
 Phase 1 work is in progress on `feat/PHASE-1-development`, branched from
