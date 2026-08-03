@@ -46,6 +46,10 @@ model_runtime:
   allow_parallel_heavy_models: false
 
 audio:
+  # Short tones for "wake phrase heard" and "working on it", so Jarvis is
+  # legible from the tray without its window open.
+  cues_enabled: true
+
   wake_word:
     provider: openwakeword
     # ADR-0016 Path 1 layers a personal verifier on a pretrained base model, and
@@ -154,6 +158,8 @@ ui:
   # leaves the panic button unreachable. End exists on every layout.
   emergency_stop_hotkey: "Ctrl+Alt+End"
   start_at_sign_in: false
+  # What to call you. Set it on the Conversation screen; empty means "You".
+  user_name: ""
   approval_timeout_seconds: 120.0
 
 storage:

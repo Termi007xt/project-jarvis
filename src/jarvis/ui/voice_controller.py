@@ -28,7 +28,9 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal
 
+from jarvis.audio.cues import Cue, cue_audio
 from jarvis.audio.pipeline import CommandHeard, ListeningState
+from jarvis.audio.playback import play
 
 __all__ = ["VoiceController"]
 
@@ -113,6 +115,47 @@ class VoiceController(QObject):
 
     def _on_state(self, state: str) -> None:
         self._panel.set_listening_state(state)  # type: ignore[attr-defined]
+        # The cue is the whole point of a tray application: it tells the user
+        # what happened without needing the window on screen.
+        if state == ListeningState.CAPTURING_COMMAND.value:
+            self.play_cue(Cue.WAKE)
+
+    def play_cue(self, name: str) -> None:
+        """Play a short tone. Never blocks, never raises onto the caller."""
+        if not getattr(self._voice, "cues_enabled", True):
+            return
+        chunk = cue_audio(name)
+        if chunk is None:
+            return
+
+        device = getattr(self._voice, "output_device_index", None)
+
+        def emit() -> None:
+            try:
+                play(chunk, device_index=device)
+            except Exception:  # noqa: BLE001 - a cue must not break the thing it announces
+                _LOG.debug("could not play the '%s' cue", name, exc_info=True)
+
+        thread = threading.Thread(target=emit, name=f"jarvis-cue-{name}", daemon=True)
+        thread.start()
+
+    # -- speaking a reply --------------------------------------------------
+    def speak_reply(self, text: str) -> None:
+        """Say an answer aloud, off the GUI thread."""
+        if not text.strip():
+            return
+        self._run_off_thread("speak-reply", lambda: self._speak_reply(text))
+
+    def _speak_reply(self, text: str) -> None:
+        result = self._voice.speak(text)  # type: ignore[attr-defined]
+        if result is None or not result.spoken_aloud:
+            detail = (
+                result.playback.error
+                if result is not None and result.playback.error
+                else "no voice is available"
+            )
+            _LOG.info("could not speak the reply: %s", detail)
+            self.noticed.emit("Could not say that aloud", detail)
 
     def _on_heard(self, text: str, confidence: object) -> None:
         self._panel.set_last_heard(  # type: ignore[attr-defined]

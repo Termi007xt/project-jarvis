@@ -220,6 +220,13 @@ def build_argv(entry: ApplicationEntry, argument: str | None = None) -> tuple[st
         # variable part and it was pattern-validated above.
         return (_EXPLORER, f"shell:AppsFolder\\{entry.target}")
 
+    if not extra and entry.argument_kind is not ArgumentKind.NONE:
+        # Fixed arguments that exist to introduce a value are meaningless
+        # without it: "steam.exe -applaunch" with no id is a malformed command
+        # line, whereas plain "steam.exe" opens the client, which is what
+        # "open Steam" means.
+        return (entry.target,)
+
     return (entry.target, *entry.fixed_arguments, *extra)
 
 
@@ -463,7 +470,9 @@ def default_catalogue(config: object | None = None) -> ApplicationCatalogue:
                 target=rf"{program_files_x86}\Steam\steam.exe",
                 fixed_arguments=("-applaunch",),
                 argument_kind=ArgumentKind.STEAM_APP_ID,
-                argument_required=True,  # "-applaunch" with no id is malformed
+                # "open Steam" means open the client. With an app id it becomes
+                # "steam.exe -applaunch <id>"; without one, just "steam.exe".
+                argument_required=False,
                 verify_process_names=("steam.exe",),
             ),
         )

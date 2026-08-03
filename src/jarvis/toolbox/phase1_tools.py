@@ -41,6 +41,8 @@ from jarvis.toolbox.media import MediaAction, VolumeAction, media_available, sen
 __all__ = [
     "OpenApplicationTool",
     "OpenUrlTool",
+    "WebSearchTool",
+    "SEARCH_ENGINES",
     "MediaControlTool",
     "VolumeControlTool",
     "SpeakTool",
@@ -107,9 +109,12 @@ class OpenApplicationTool:
             raise ToolFailure(
                 "unknown_application",
                 f"'{parameters.application}' is not in the approved application "
-                f"catalogue. Known: {', '.join(self._catalogue.ids()) or 'none'}. "
-                "Add it in Applications first — Jarvis will not launch something "
-                "that has not been approved.",
+                f"catalogue, so it cannot be opened. Approved: "
+                f"{', '.join(self._catalogue.ids()) or 'none'}. "
+                "There is no way to add an application from inside Jarvis in "
+                "this build — do not tell the user to look for one. Adding an "
+                "application is a change only the owner can make to the "
+                "catalogue itself.",
             )
         try:
             outcome = launch(entry, parameters.argument)
@@ -210,6 +215,133 @@ class OpenUrlTool:
             verification=Verification.VERIFIED if outcome.verified else Verification.UNVERIFIED,
             message=outcome.detail,
             evidence={"argv": list(outcome.argv)},
+        )
+
+
+# =========================================================================
+# Web search
+# =========================================================================
+#: Search engines Jarvis will build a query for. A closed table, so the model
+#: chooses *which approved engine*, never a URL — the same rule the application
+#: catalogue applies to executables (ADR-0029 constraint 3).
+SEARCH_ENGINES: dict[str, str] = {
+    "google": "https://www.google.com/search?q={query}",
+    "duckduckgo": "https://duckduckgo.com/?q={query}",
+    "youtube": "https://www.youtube.com/results?search_query={query}",
+}
+
+DEFAULT_SEARCH_ENGINE = "duckduckgo"
+
+
+class WebSearchInput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    query: str = Field(
+        min_length=1,
+        max_length=400,
+        description="What to search for, in plain words. Not a URL.",
+    )
+    engine: str = Field(
+        default=DEFAULT_SEARCH_ENGINE,
+        description=f"One of: {', '.join(sorted(SEARCH_ENGINES))}.",
+    )
+
+
+class WebSearchOutput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    query: str
+    engine: str
+    url: str
+    started: bool
+    verified: bool
+    detail: str
+
+
+class WebSearchTool:
+    """Search the web for a phrase, in the approved browser.
+
+    Exists because asking the model for a URL produced malformed ones. A real
+    example that reached the user as a Google 400 page:
+
+        https://www.google.com/search?q=latest%2Bupcoming%2Bvideogames+%3A2027&tbm=news
+
+    The model had percent-encoded its own separators. Taking the words and
+    building the URL here removes the whole class of error: there is exactly
+    one place that knows how to encode a query, and it is not the model.
+    """
+
+    spec = ToolSpec(
+        tool_id="web.search",
+        version="1.0.0",
+        description=(
+            "Search the web for a phrase and open the results in the approved "
+            "browser. Give plain words — never a URL, and never pre-encoded text."
+        ),
+        input_model=WebSearchInput,
+        output_model=WebSearchOutput,
+        risk=RiskLevel.LOW,
+        required_capabilities=("web.open_approved_url",),
+        resource_locks=(),
+        timeout_seconds=30.0,
+        retry_policy=RetryPolicy(max_attempts=1),
+        changes_state=True,
+        verification="Confirms the browser process is running before reporting success.",
+        failure_codes=("no_browser", "unknown_engine", "refused_url", "launch_failed"),
+        target_parameter="query",
+        reversible=True,
+    )
+
+    def __init__(self, catalogue: ApplicationCatalogue, browser_id: str = "brave") -> None:
+        self._catalogue = catalogue
+        self._browser_id = browser_id
+
+    def run(self, context: ToolContext, parameters: BaseModel) -> ToolExecution:
+        assert isinstance(parameters, WebSearchInput)
+        from urllib.parse import quote_plus
+
+        engine = parameters.engine.strip().lower()
+        template = SEARCH_ENGINES.get(engine)
+        if template is None:
+            raise ToolFailure(
+                "unknown_engine",
+                f"'{parameters.engine}' is not a search engine Jarvis knows. "
+                f"Use one of: {', '.join(sorted(SEARCH_ENGINES))}.",
+            )
+
+        entry = self._catalogue.get(self._browser_id)
+        if entry is None:
+            raise ToolFailure(
+                "no_browser",
+                f"'{self._browser_id}' is not in the application catalogue, so "
+                "there is no approved browser to search in.",
+            )
+
+        # One encoding, done once, by code that knows the rules.
+        url = template.format(query=quote_plus(parameters.query.strip()))
+        try:
+            outcome = launch(entry, url)
+        except CatalogueError as exc:
+            raise ToolFailure("refused_url", str(exc)) from exc
+        except OSError as exc:
+            raise ToolFailure("launch_failed", str(exc)) from exc
+
+        return ToolExecution(
+            output=WebSearchOutput(
+                query=parameters.query,
+                engine=engine,
+                url=url,
+                started=outcome.started,
+                verified=outcome.verified,
+                detail=outcome.detail,
+            ),
+            verification=Verification.VERIFIED if outcome.verified else Verification.UNVERIFIED,
+            message=(
+                f"Searched {engine} for '{parameters.query}'. {outcome.detail} "
+                "Jarvis cannot read the results — they are on your screen, not "
+                "available to it."
+            ),
+            evidence={"argv": list(outcome.argv), "url": url},
         )
 
 
@@ -492,6 +624,7 @@ def register_phase1_tools(
     tools: list[object] = [
         OpenApplicationTool(catalogue),
         OpenUrlTool(catalogue),
+        WebSearchTool(catalogue),
         MediaControlTool(),
         VolumeControlTool(),
     ]

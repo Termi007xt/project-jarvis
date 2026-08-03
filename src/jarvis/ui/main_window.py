@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
     historyClearRequested = Signal()
     installWakeModelRequested = Signal()
     removeWakeModelRequested = Signal()
+    userNameChanged = Signal(str)
 
     def __init__(self, core: JarvisCore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -345,6 +346,8 @@ class MainWindow(QMainWindow):
             panel.sendRequested.connect(self.conversationSendRequested.emit)
             panel.privateSessionToggled.connect(self.privateSessionToggled.emit)
             panel.historyCleared.connect(self.historyClearRequested.emit)
+            panel.userNameChanged.connect(self.userNameChanged.emit)
+            panel.set_user_name(self._core.config.ui.user_name)
             return panel
         if area.key == "home":
             panel = _TextPanel("Home")

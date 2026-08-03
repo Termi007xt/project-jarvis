@@ -200,6 +200,11 @@ class AudioConfig(_Base):
     text_to_speech: TextToSpeechConfig
     pronunciation: PronunciationConfig
     language: LanguageConfig
+    #: Short tones marking "I heard the wake phrase" and "I am working on it".
+    #: They are how a tray application stays legible without its window, so
+    #: they are on by default — but they are also the kind of thing that grates,
+    #: so they can be turned off.
+    cues_enabled: bool = True
 
 
 class DefaultPermissionPolicy(_Base):
@@ -235,6 +240,10 @@ class UiConfig(_Base):
     #: all, which makes the panic button unreachable on the hardware most
     #: likely to need it. End is present on every layout.
     emergency_stop_hotkey: str = "Ctrl+Alt+End"
+    #: What to call the user. Shown instead of "You" in the transcript, and told
+    #: to the model so it can address them. Empty means "You" and no claim about
+    #: who is speaking. Stays on this machine like everything else.
+    user_name: str = ""
     #: PRD FR-002. Registered per-user, so it never needs elevation (ADR-0009).
     start_at_sign_in: bool = False
     #: An unanswered approval is denied after this long (ADR-0027). Bounded by

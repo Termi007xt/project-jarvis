@@ -264,6 +264,14 @@ class VoiceService:
             return self.start_capture(device_index)
         return True
 
+    @property
+    def output_device_index(self) -> int | None:
+        return self._output_device_index
+
+    @property
+    def cues_enabled(self) -> bool:
+        return bool(getattr(self._config.audio, "cues_enabled", True))  # type: ignore[attr-defined]
+
     def set_output_device(self, device_index: int | None) -> None:
         self._output_device_index = device_index
 

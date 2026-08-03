@@ -243,6 +243,12 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         "system.health",      # Phase 0
         "app.open",           # Phase 1, PRD section 21
         "web.open_url",
+        # Added after acceptance testing: asked to search, the model built its
+        # own URL and produced a malformed one that Google answered with 400.
+        # A narrow tool that takes words and does the encoding removes the
+        # whole class of error. It widens nothing — same capability, same
+        # browser, same scheme restriction as web.open_url.
+        "web.search",
         "media.control",
         "device.volume",
         "voice.speak",

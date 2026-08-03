@@ -23,6 +23,7 @@ from jarvis.core.events.types import (
     NetworkModeChanged,
     TaskStateChanged,
 )
+from jarvis.audio.cues import Cue
 from jarvis.runtime.core import JarvisCore
 from jarvis.runtime.hotkeys import GlobalHotkeys
 from jarvis.tasks.states import TaskState
@@ -71,6 +72,8 @@ class JarvisApplication(QObject):
         self._conversation_worker: ConversationWorker | None = None
         self._private_session = False
         self._recording = False
+        #: Set when the current turn arrived by voice, so the reply is spoken.
+        self._answer_aloud = False
 
         #: The voice stack was built by the core and reported honestly on the
         #: Voice screen, but nothing was ever connected to it. This is that
@@ -142,8 +145,18 @@ class JarvisApplication(QObject):
         self._apply_state()
 
     def _on_command_heard(self, text: str) -> None:
-        """A spoken command becomes an ordinary conversation turn."""
-        self.show_window("conversation")
+        """A spoken command becomes an ordinary conversation turn.
+
+        The window is deliberately **not** raised. Taking over the screen
+        because someone spoke is the same intrusion the approval panel exists
+        to avoid (ADR-0027), and it is worse here because speaking is meant to
+        be the way to use Jarvis *without* going to the window. The answer is
+        spoken instead, and the transcript stays on the Voice screen.
+        """
+        self._answer_aloud = True
+        cue = getattr(self.voice, "play_cue", None)
+        if cue is not None:
+            cue(Cue.THINKING)
         self.send_message(text)
 
     # -- wiring ------------------------------------------------------------
@@ -166,6 +179,7 @@ class JarvisApplication(QObject):
         self.window.historyClearRequested.connect(self.clear_history)
         self.window.installWakeModelRequested.connect(self.install_wake_model)
         self.window.removeWakeModelRequested.connect(self.remove_wake_model)
+        self.window.userNameChanged.connect(self.set_user_name)
 
         self.bridge.eventReceived.connect(self._on_event)
 
@@ -383,8 +397,12 @@ class JarvisApplication(QObject):
     def _on_turn_finished(self, turn: object) -> None:
         panel = self.window.conversation_panel()
         panel.set_busy(False)
+        spoken, self._answer_aloud = self._answer_aloud, False
         if not getattr(turn, "ok", False):
-            panel.append_error(getattr(turn, "error", "") or "no answer")
+            message = getattr(turn, "error", "") or "no answer"
+            panel.append_error(message)
+            if spoken:
+                self._say(f"That did not work. {message}")
         else:
             panel.append_reply(turn.reply, turn.label)  # type: ignore[attr-defined]
             for refusal in getattr(turn, "refused_proposals", ()):
@@ -392,12 +410,27 @@ class JarvisApplication(QObject):
             review = getattr(turn, "review", None)
             if review is not None and review.amended:
                 panel.append_note(review.note or "")
+            # Asked by voice, answered by voice. Anything else means walking to
+            # the window to read the reply, which is the opposite of the point.
+            if spoken:
+                self._say(turn.reply)  # type: ignore[attr-defined]
         self.window.refresh_conversation()
 
+    def _say(self, text: str) -> None:
+        speak = getattr(self.voice, "speak_reply", None)
+        if speak is not None:
+            speak(text)
+
     def _on_turn_failed(self, message: str) -> None:
+        spoken, self._answer_aloud = self._answer_aloud, False
         panel = self.window.conversation_panel()
         panel.set_busy(False)
         panel.append_error(message)
+        if spoken:
+            # A failure the user cannot see is a failure they will not know
+            # about at all, since the window is not raised for voice.
+            self._say("Sorry, that did not work.")
+            self.tray.notify("Jarvis could not answer", message)
 
     def set_private_session(self, private: bool) -> None:
         """Switching mid-conversation ends the current one (PRD FR-046)."""
@@ -410,6 +443,17 @@ class JarvisApplication(QObject):
         panel.set_private(private)
         if not private:
             panel.append_note("History is being recorded again.")
+
+    def set_user_name(self, name: str) -> None:
+        """Persist the name and rebuild the engine so the model is told it."""
+        self._persist_setting("ui.user_name", name.strip())
+        panel = self.window.conversation_panel()
+        panel.set_user_name(name)
+        panel.append_note(
+            f"Jarvis will call you {name.strip()} from now on."
+            if name.strip()
+            else "Jarvis will not use a name for you."
+        )
 
     def clear_history(self) -> None:
         removed = self._core.history.delete_all()

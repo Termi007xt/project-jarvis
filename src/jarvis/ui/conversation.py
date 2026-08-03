@@ -73,6 +73,7 @@ class ConversationPanel(QWidget):
     sendRequested = Signal(str)
     privateSessionToggled = Signal(bool)
     historyCleared = Signal()
+    userNameChanged = Signal(str)
 
     def __init__(self, core: object, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -87,6 +88,18 @@ class ConversationPanel(QWidget):
         heading.setStyleSheet("font-size: 20px; font-weight: 600;")
         header.addWidget(heading)
         header.addStretch(1)
+
+        header.addWidget(QLabel("Your name"))
+        self.name_field = QLineEdit()
+        self.name_field.setAccessibleName("Your name")
+        self.name_field.setPlaceholderText("You")
+        self.name_field.setMaximumWidth(160)
+        self.name_field.setToolTip(
+            "Shown instead of \"You\" in this transcript, and told to Jarvis so "
+            "it can address you. Stored on this computer only."
+        )
+        self.name_field.editingFinished.connect(self._name_edited)
+        header.addWidget(self.name_field)
 
         self.private_toggle = QCheckBox("Private session")
         self.private_toggle.setAccessibleName("Private session")
@@ -130,6 +143,7 @@ class ConversationPanel(QWidget):
         self._busy = False
         self._available = True
         self._reason: str | None = None
+        self._user_name = ""
 
     # -- state -------------------------------------------------------------
     def set_availability(self, available: bool, reason: str | None) -> None:
@@ -165,9 +179,28 @@ class ConversationPanel(QWidget):
                 "Private session — nothing from here is written to disk."
             )
 
+    # -- who is speaking ---------------------------------------------------
+    def set_user_name(self, name: str) -> None:
+        """Persisted, so it survives a restart; blank falls back to "You"."""
+        self._user_name = (name or "").strip()
+        blocked = self.name_field.blockSignals(True)
+        self.name_field.setText(self._user_name)
+        self.name_field.blockSignals(blocked)
+
+    @property
+    def user_name(self) -> str:
+        return self._user_name or "You"
+
+    def _name_edited(self) -> None:
+        name = self.name_field.text().strip()
+        if name == self._user_name:
+            return
+        self._user_name = name
+        self.userNameChanged.emit(name)
+
     # -- transcript --------------------------------------------------------
     def append_user(self, text: str) -> None:
-        self.transcript.append(f"<p><b>You:</b> {_escape(text)}</p>")
+        self.transcript.append(f"<p><b>{_escape(self.user_name)}:</b> {_escape(text)}</p>")
 
     def append_reply(self, text: str, label: SourceLabel) -> None:
         colour, wording = _LABEL_STYLE.get(label, ("#6b7280", label.value))

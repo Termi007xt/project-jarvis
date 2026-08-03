@@ -99,7 +99,9 @@ class ConversationEngine:
         max_context_messages: int = 24,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
         session_id: str | None = None,
+        user_name: str = "",
     ) -> None:
+        self._user_name = (user_name or "").strip()
         self._provider = provider
         self._invoker = invoker
         self._history = history
@@ -193,6 +195,10 @@ class ConversationEngine:
             return turn
 
         text = response.text if response is not None else ""
+        if not text.strip():
+            # A blank reply under a confident label is the worst outcome there
+            # is: it looks like Jarvis ignored you. Say what actually happened.
+            text = _describe_silence(turn.tool_results)
         review = review_response(text, tool_results=turn.tool_results)
         turn.review = review
         turn.reply = review.text
@@ -244,6 +250,14 @@ class ConversationEngine:
         from jarvis.llm.ollama.chat import system_prompt_untrusted_rule
 
         system = f"{system}\n{system_prompt_untrusted_rule()}"
+        if self._user_name:
+            # Their own name, set by them in the GUI. Not a fact retrieved from
+            # anywhere, so it carries no authority beyond what to call them.
+            system = (
+                f"{system}\nThe person you are speaking with is called "
+                f"{self._user_name}. Address them by that name when it is "
+                "natural to do so."
+            )
 
         messages = [ChatMessage(role=ChatRole.SYSTEM, content=system)]
         turns = (
@@ -266,6 +280,36 @@ class ConversationEngine:
         from jarvis.llm.ollama.chat import tool_schema_for
 
         return tuple(tool_schema_for(spec) for spec in self._registry.specs())
+
+
+def _describe_silence(results: tuple[Any, ...]) -> str:
+    """What to say when the model returned no words at all.
+
+    It happens: a small model sometimes answers a tool call with an empty
+    message. Showing that blank was indistinguishable from Jarvis ignoring the
+    user, and it still carried a source label, so it read as a confident
+    non-answer. Report what the tools did, or say plainly that nothing came
+    back — never invent the reply the model failed to give.
+    """
+    described = [
+        f"{getattr(result, 'tool_id', 'a tool')}: {getattr(result, 'message', '') or 'no detail'}"
+        for result in results
+        if getattr(result, "succeeded", False)
+    ]
+    if described:
+        return (
+            "That went through, but the model returned no words to go with it. "
+            "Here is what actually ran — " + "; ".join(described)
+        )
+    if results:
+        return (
+            "The model returned an empty reply, and the tool it tried did not "
+            "succeed. Nothing was changed on your computer."
+        )
+    return (
+        "The model returned an empty reply. Nothing was done and I have nothing "
+        "to report — please ask again, or rephrase it."
+    )
 
 
 def _describe_result(result: Any) -> str:

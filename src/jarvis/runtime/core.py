@@ -347,6 +347,7 @@ class JarvisCore:
             personality=self.personality,
             registry=self.registry,
             session_id=self.session_id,
+            user_name=self.config.ui.user_name,
         )
 
     def start_conversation(
@@ -486,7 +487,12 @@ class JarvisCore:
         # The chat provider captured the network mode and the model name when it
         # was built, so a settings change has to rebuild it. Otherwise switching
         # to offline mode would leave a provider that still opens sockets.
-        if self._started and key_path.startswith(("network.", "models.", "llm.")):
+        # ui.user_name is in here because the model is told the name in the
+        # system prompt, which is built when the engine is.
+        if self._started and (
+            key_path.startswith(("network.", "models.", "llm."))
+            or key_path == "ui.user_name"
+        ):
             self.models.update(self.config)
             self.conversation = self._build_conversation_engine()
             # The speech model hubs read their offline switch when a model
