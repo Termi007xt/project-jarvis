@@ -4,11 +4,12 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Phase 1: voice-first local assistant (stages 1–3)
+## [Unreleased] — Phase 1: voice-first local assistant
 
-Jarvis can now hold a conversation and has a voice. It still performs **no
-desktop or browser automation**, and it cannot yet launch an application —
-that is gated on ADR-0029 rather than merely unbuilt.
+Jarvis can now hold a conversation, hear you, speak back, and open the handful
+of applications and websites you have approved. It still performs **no other
+desktop or browser automation** — no clicking, typing, reading the screen or
+touching your files.
 
 ### Added
 
@@ -41,6 +42,22 @@ that is gated on ADR-0029 rather than merely unbuilt.
   administrator rights.
 - **`--require-healthy`** for `--check`, when a caller needs an unreachable
   model runtime to be a failure rather than an honest report.
+- **Opening approved applications and websites.** Brave, YouTube, YouTube Music,
+  Xbox and Sea of Thieves, from a fixed catalogue. Jarvis chooses *which
+  approved entry*, never which program — and it says an application opened only
+  after it has seen the process running.
+- **Media and volume keys**, and **desktop notifications**.
+- **Jarvis speaks out loud.** Synthesis previously produced audio that nothing
+  ever played. Speech is now audible, can be interrupted mid-sentence, and
+  Jarvis reports how long it actually spoke for.
+- **A one-time wake-word model installation**, `--install-wake-model`, which
+  says exactly where the files go, is safe to repeat, and reports the model as
+  installed only once the detector genuinely starts. The model is never bundled
+  and is licensed for **non-commercial use only**.
+- **The Voice screen's controls now work**: choosing a microphone, testing it
+  with a live level meter, measuring the room, and previewing a voice.
+- **A recording indicator.** The tray and the Voice screen both show whenever
+  the microphone is open.
 
 ### Changed
 
@@ -49,16 +66,38 @@ that is gated on ADR-0029 rather than merely unbuilt.
   pages.
 - The Home screen reports the voice stack, the secret store and the conversation
   engine, and no longer describes the build as Phase 0.
+- **Push-to-talk is press-to-start, not hold-to-talk.** Windows reports only the
+  key press for a global hotkey, so holding F9 never worked. Press it, speak,
+  and it stops on its own when you stop talking.
+- In **offline mode** the speech models are pinned to their local cache. Loading
+  a voice or transcription model previously contacted the Hugging Face Hub,
+  which was a network request from a component presented as entirely local.
+
+### Fixed
+
+- **Typing a message produced no reply at all.** The Conversation screen sent
+  the message onto a worker that had already been destroyed, so nothing was ever
+  asked of the model — and because nothing failed, nothing was reported.
+- **"Thinking…" silently reverted to "Ready"** part-way through an answer.
+- **Quitting while Jarvis was answering could kill the process outright.**
+- **No button on the Voice screen did anything.** They were enabled and
+  connected to nothing. Push-to-talk reported that the voice stack was
+  unavailable while it was fully installed and working.
+- **Jarvis claimed it had spoken when it had not.** `voice.speak` reported a
+  confirmed success on the strength of having produced audio, while nothing
+  played it. It now fails plainly if no sound reached the output device.
 
 ### Known limitations
 
-- **Wake-word detection is not active.** No "Hey Jarvis" model is installed, so
-  Jarvis is not listening for a wake phrase; push-to-talk is the way to speak to
-  it. Per-user enrolment is not built.
+- **Wake-word detection is installed but always-listening stays off.** The
+  pretrained "Hey Jarvis" model is measured and working; per-user enrolment is
+  not built, and ADR-0016 does not permit always-listening without it.
+  Single-word "Jarvis" is not detected — measured 0 of 4 attempts.
 - **Barge-in is unproven on real hardware.** Interrupting Jarvis mid-sentence is
   implemented, but the rate at which it mistakes its own voice for yours has not
   been measured, so it should not yet be relied upon.
-- **No application launching, media control, volume control or notifications.**
+- **A spoken question is answered in writing, not aloud**, unless you ask Jarvis
+  to speak.
 
 ---
 

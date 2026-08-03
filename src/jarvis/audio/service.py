@@ -16,8 +16,10 @@ from pathlib import Path
 from jarvis.audio.availability import describe_voice_stack
 from jarvis.audio.capture import CaptureSession, capture_available, default_input_device
 from jarvis.audio.duplex import DuplexCoordinator, DuplexMode
+from jarvis.audio.model_hub import apply_network_policy
 from jarvis.audio.pipeline import CommandHeard, ListeningState, VoicePipeline
-from jarvis.audio.ports import AudioChunk, AudioUnavailable, SynthesisResult
+from jarvis.audio.playback import PlaybackReport, play, playback_available
+from jarvis.audio.ports import AudioChunk, AudioUnavailable
 from jarvis.audio.ring_buffer import RingBuffer
 from jarvis.audio.stt import build_stt_provider
 from jarvis.audio.tts import build_tts_provider
@@ -26,9 +28,29 @@ from jarvis.audio.wake import build_wake_detector, wake_model_path
 from jarvis.core.audit.log import AuditLog
 from jarvis.core.audit.models import AuditCategory
 
-__all__ = ["VoiceService", "VoiceStatus"]
+__all__ = ["VoiceService", "VoiceStatus", "SpokenResult"]
 
 _LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SpokenResult:
+    """What was synthesised, and what was actually played (PRD FR-048).
+
+    Carries the same fields the synthesis result did, so callers that only want
+    the audio are unaffected, plus the playback report that says whether any of
+    it reached a speaker.
+    """
+
+    audio: AudioChunk
+    voice_id: str
+    text: str
+    redacted: bool
+    playback: PlaybackReport
+
+    @property
+    def spoken_aloud(self) -> bool:
+        return self.playback.played
 
 
 @dataclass(frozen=True)
@@ -62,7 +84,12 @@ class VoiceService:
         self._lock = threading.RLock()
         self._capture: CaptureSession | None = None
         self._device_index: int | None = None
+        self._output_device_index: int | None = None
         self._calibration: NoiseCalibration | None = None
+
+        # AT-001: offline mode opens no socket, and the speech model hubs are
+        # a component the user reasonably believes is already local.
+        apply_network_policy(config)
 
         self.tts = build_tts_provider(config)
         self.stt = build_stt_provider(config)
@@ -122,6 +149,11 @@ class VoiceService:
     def capture_available(self) -> bool:
         return capture_available()
 
+    @property
+    def playback_available(self) -> bool:
+        """Whether anything can actually be heard. Speaking depends on it."""
+        return playback_available()
+
     def start_capture(self, device_index: int | None = None) -> bool:
         """Open the microphone. Returns False, honestly, if it cannot."""
         if not self.capture_available:
@@ -173,8 +205,14 @@ class VoiceService:
         return self._calibration
 
     # -- speaking ----------------------------------------------------------
-    def speak(self, text: str, *, voice_id: str | None = None) -> SynthesisResult | None:
-        """Synthesise and hand back audio. Playback is the shell's job."""
+    def speak(self, text: str, *, voice_id: str | None = None) -> SpokenResult | None:
+        """Synthesise **and play**, then report what actually came out.
+
+        Synthesis alone used to be the whole of this method, and the caller
+        reported "Spoken." on the strength of it. Nothing played the audio, so
+        that was a verified success claim for a silent room (PRD FR-048). The
+        returned report now says how much audio reached the device.
+        """
         if not getattr(self.tts, "available", False):
             reason = getattr(self.tts, "unavailable_reason", lambda: None)()
             _LOG.info("cannot speak: %s", reason)
@@ -186,11 +224,60 @@ class VoiceService:
             _LOG.warning("synthesis failed: %s", exc)
             self.pipeline.speaking_finished()
             return None
+
         if result.redacted:
             # FR-034: say that something was withheld rather than silently
             # speaking a different sentence.
             self._record("spoken output was redacted before it was spoken aloud")
-        return result
+
+        try:
+            report = play(
+                result.audio,
+                device_index=self._output_device_index,
+                # ADR-0028: barge-in cuts playback between blocks.
+                should_stop=lambda: self.pipeline.duplex.stop_requested,
+                on_block=self.pipeline.duplex.note_emitted_level,
+            )
+        finally:
+            self.pipeline.speaking_finished()
+
+        if report.error:
+            _LOG.warning("nothing was spoken aloud: %s", report.error)
+        if report.interrupted:
+            self._record("speech was interrupted by the user (barge-in)")
+        return SpokenResult(
+            audio=result.audio,
+            voice_id=result.voice_id,
+            text=result.text,
+            redacted=result.redacted,
+            playback=report,
+        )
+
+    def set_input_device(self, device_index: int | None) -> bool:
+        """Choose the microphone (PRD FR-016). Reopens an open stream."""
+        was_capturing = self.capturing
+        if was_capturing:
+            self.stop_capture()
+        with self._lock:
+            self._device_index = device_index
+        if was_capturing:
+            return self.start_capture(device_index)
+        return True
+
+    def set_output_device(self, device_index: int | None) -> None:
+        self._output_device_index = device_index
+
+    def apply_network_policy(self) -> bool:
+        """Re-pin the model hubs after a network-mode change (AT-001)."""
+        return apply_network_policy(self._config)
+
+    def set_indicator(self, indicator) -> None:
+        """Attach the recording indicator (PRD FR-013).
+
+        Capture may not start without announcing itself, and only the shell can
+        show it, so it is attached rather than passed in at construction.
+        """
+        self._indicator = indicator
 
     def finished_speaking(self) -> None:
         self.pipeline.speaking_finished()
@@ -208,6 +295,20 @@ class VoiceService:
 
     def end_push_to_talk(self) -> CommandHeard | None:
         return self.pipeline.end_push_to_talk()
+
+    @property
+    def capturing_command(self) -> bool:
+        return self.pipeline.state is ListeningState.CAPTURING_COMMAND
+
+    def set_command_listener(self, callback) -> None:
+        """Where a finished spoken command goes. Nothing listened before."""
+        self.pipeline.set_command_listener(callback)
+
+    def set_state_listener(self, callback) -> None:
+        self.pipeline.set_state_listener(callback)
+
+    def set_level_listener(self, callback) -> None:
+        self.pipeline.set_level_listener(callback)
 
     def shutdown(self) -> None:
         self.stop_capture()

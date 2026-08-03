@@ -489,6 +489,12 @@ class JarvisCore:
         if self._started and key_path.startswith(("network.", "models.", "llm.")):
             self.models.update(self.config)
             self.conversation = self._build_conversation_engine()
+            # The speech model hubs read their offline switch when a model
+            # loads, which may be long after this, so re-pin them now (AT-001).
+            voice = getattr(self, "voice", None)
+            if voice is not None:
+                voice._config = self.config  # noqa: SLF001 - keep it in step
+                voice.apply_network_policy()
 
         if key_path == "network.mode":
             self.events.publish(

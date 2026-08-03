@@ -1,14 +1,28 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-02
+- **Last updated:** 2026-08-03
 - **Current branch:** `feat/PHASE-1-development`
-- **HEAD commit:** `f0f7279` — all four Phase 1 stages implemented; tree clean
-- **Active phase:** **Phase 1 — code complete, awaiting user acceptance testing**
-- **Overall status:** Green. `python -m pytest` → **698 passed, 2 skipped**
-  (Phase 0 baseline was 386). Nothing is blocked. Phase 1 is **not closed**:
-  the checks only a human can run are in `docs/PHASE-01-ACCEPTANCE-TESTING.md`,
-  and speaking to a real microphone is the largest untested area.
+- **HEAD commit:** `2e3a0d9` + uncommitted GUI-seam fixes (see below)
+- **Active phase:** **Phase 1 — awaiting a second user acceptance session**
+- **Overall status:** Amber, improving. `python -m pytest` → **745 passed,
+  2 skipped** (Phase 0 baseline 386; before this round 698). Nothing is blocked.
+
+**The first acceptance session (2026-08-03) failed.** The Conversation screen
+produced no reply and no Voice screen control did anything. Both were real
+defects; investigating them found four more, including one honesty failure:
+`voice.speak` reported `verified` success while **no audio playback existed
+anywhere in the product**. All six are fixed, each with a regression test named
+after the defect. Full account in
+`docs/phase-reports/PHASE-01-VOICE-FIRST.md` sections 10 and 11.
+
+**The lesson, recorded so it changes behaviour:** every unit passed while the
+product did not work, because nothing tested the *seam* between the GUI and the
+engine. `tests/ui/test_conversation_screen.py` passed in full against a screen
+that was completely non-functional. New wiring tests
+(`tests/ui/test_conversation_wiring.py`, `tests/ui/test_voice_wiring.py`) assert
+the connections, including a general rule: an enabled control either does
+something or says why it cannot.
 
 ## Current Objective
 
@@ -201,12 +215,13 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-1. **User acceptance testing.** `docs/PHASE-01-ACCEPTANCE-TESTING.md` is the
-   script: what to run, what to expect, what to report, and where imperfection
-   is expected rather than a defect. **Phase 2 does not start until this is
-   done.** The five that matter most: the `--check` block, source labelling and
-   honest refusal, whether the approval prompt steals keyboard focus, whether
-   the five named applications actually open, and the four wake-word counts.
+1. **A second user acceptance session.** `docs/PHASE-01-ACCEPTANCE-TESTING.md`
+   is the script, revised 2026-08-03 after the first session failed. **Phase 2
+   does not start until this is done.** Sections 3, 7 and 8 are the ones to
+   re-run — they cover everything that was broken. The five that matter most:
+   the `--check` block, **whether a typed message now gets a reply at all**,
+   whether F9 (press, not hold) transcribes, whether Voice → Preview is
+   audible, and whether the approval prompt steals keyboard focus.
 
 2. **Act on the wake-word counts.** They decide whether always-listening can be
    enabled at all, and what threshold it uses. The shipped 0.6 is a measured
@@ -216,15 +231,12 @@ model (configured, not benchmarked).
    relying on barge-in. If the rate is unacceptable, degrade to half-duplex and
    say so in the GUI — that path is implemented, not assumed unnecessary.
 
-4. **Join the voice loop end to end.** Speech-in and speech-out both work
-   independently; nothing yet wires microphone → transcript → planner → spoken
-   reply as one continuous path.
+4. **Speak the reply back.** Microphone → transcript → planner now works as one
+   path (`jarvis.ui.voice_controller`), and speaking aloud works, but a
+   conversation reply is not yet automatically spoken when the turn arrived by
+   voice. That last hop is the remainder of "voice-first".
 
-5. **Wire the Voice screen's controls to the service.** The screen reports state
-   correctly and its signals exist; test meter, calibration and preview are not
-   yet connected to `VoiceService`.
-
-6. **Per-user wake enrolment (ADR-0016 Path 1).** The measurement types,
+5. **Per-user wake enrolment (ADR-0016 Path 1).** The measurement types,
    threshold fitting and quality bar exist and are tested; the recording flow
    and the personal verifier do not.
 

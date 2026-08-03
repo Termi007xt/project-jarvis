@@ -101,6 +101,7 @@ class VoicePipeline:
 
         self._lock = threading.RLock()
         self._state = ListeningState.OFF
+        self._frame_observers: list[Callable[[AudioChunk], None]] = []
         self._command_frames: list[AudioChunk] = []
         self._route: ActivationRoute | None = None
         self._wake_event: WakeEvent | None = None
@@ -119,6 +120,33 @@ class VoicePipeline:
     @property
     def duplex(self) -> DuplexCoordinator:
         return self._duplex
+
+    # -- listeners ---------------------------------------------------------
+    # The service is built at start-up, before there is a shell to hand the
+    # commands to, so the listeners are attached rather than passed in. Without
+    # this the pipeline transcribed commands that went nowhere.
+    def set_command_listener(self, callback: Callable[[CommandHeard], None] | None) -> None:
+        self._on_command = callback
+
+    def set_state_listener(self, callback: Callable[[ListeningState], None] | None) -> None:
+        self._on_state = callback
+
+    def set_level_listener(self, callback: Callable[[float], None] | None) -> None:
+        self._on_level = callback
+
+    def add_frame_observer(self, callback: Callable[[AudioChunk], None]) -> None:
+        """Watch raw frames, for measuring the room (PRD FR-017).
+
+        Observers see frames whatever the listening state, because calibration
+        happens while nothing is being listened *for*.
+        """
+        with self._lock:
+            self._frame_observers.append(callback)
+
+    def remove_frame_observer(self, callback: Callable[[AudioChunk], None]) -> None:
+        with self._lock:
+            if callback in self._frame_observers:
+                self._frame_observers.remove(callback)
 
     @property
     def ring_buffer(self) -> RingBuffer:
@@ -179,6 +207,14 @@ class VoicePipeline:
                 self._on_level(rms_level(chunk))
             except Exception:  # noqa: BLE001
                 _LOG.exception("a level listener raised")
+
+        with self._lock:
+            observers = list(self._frame_observers)
+        for observe in observers:
+            try:
+                observe(chunk)
+            except Exception:  # noqa: BLE001 - never kill the audio thread
+                _LOG.exception("a frame observer raised")
 
         state = self.state
         if state is ListeningState.OFF:

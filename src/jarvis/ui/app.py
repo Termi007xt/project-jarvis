@@ -32,6 +32,7 @@ from jarvis.ui.icons import TrayState
 from jarvis.ui.main_window import MainWindow
 from jarvis.ui.qt_bridge import EventBridge
 from jarvis.ui.tray import JarvisTrayIcon
+from jarvis.ui.voice_controller import VoiceController
 
 __all__ = ["JarvisApplication"]
 
@@ -51,12 +52,20 @@ class JarvisApplication(QObject):
         self.window = MainWindow(core)
         self.tray = JarvisTrayIcon(self)
         self.bridge = EventBridge(core.events, self)
-        #: Set by the voice controller in stage 3. Until then push-to-talk says
-        #: plainly that the stack is not ready rather than doing nothing.
-        self.voice: object | None = None
         self._conversation = None
         self._conversation_thread: QThread | None = None
+        #: Held deliberately. A worker moved to a thread has no parent QObject,
+        #: so without a Python reference PySide6 destroys it as soon as
+        #: send_message returns — the thread then starts, emits ``started`` and
+        #: finds no receiver, and the turn silently never runs.
+        self._conversation_worker: ConversationWorker | None = None
         self._private_session = False
+        self._recording = False
+
+        #: The voice stack was built by the core and reported honestly on the
+        #: Voice screen, but nothing was ever connected to it. This is that
+        #: connection: push-to-talk, the level meter, and the Voice controls.
+        self.voice = self._attach_voice()
 
         # The approval surface exists, so the engine may now ask. Until this
         # line runs, the queue denies everything (ADR-0010).
@@ -86,6 +95,31 @@ class JarvisApplication(QObject):
         self._refresh_timer.setInterval(2000)
         self._refresh_timer.timeout.connect(self._refresh_if_visible)
         self._refresh_timer.start()
+
+    # -- voice (PRD FR-013, FR-016, FR-017, FR-018) ------------------------
+    def _attach_voice(self) -> object | None:
+        """Connect the voice service to the Voice screen and to push-to-talk."""
+        voice = getattr(self._core, "voice", None)
+        if voice is None:
+            return None
+
+        controller = VoiceController(voice, self.window.voice_panel(), self)
+        # FR-013: capture may not start without announcing itself.
+        voice.set_indicator(self._set_recording_indicator)
+        controller.commandHeard.connect(self._on_command_heard)
+        controller.noticed.connect(self.tray.notify)
+        controller.calibrated.connect(self.window.voice_panel().set_calibration)
+        return controller
+
+    def _set_recording_indicator(self, recording: bool) -> None:
+        """Runs on the audio thread, so it only queues work onto the GUI one."""
+        self._recording = recording
+        QTimer.singleShot(0, self._apply_state)
+
+    def _on_command_heard(self, text: str) -> None:
+        """A spoken command becomes an ordinary conversation turn."""
+        self.show_window("conversation")
+        self.send_message(text)
 
     # -- wiring ------------------------------------------------------------
     def _connect(self) -> None:
@@ -198,6 +232,11 @@ class JarvisApplication(QObject):
         if health is not None and not health.reachable and not health.skipped:
             state, detail = TrayState.BLOCKED, "Local model runtime unreachable"
 
+        # FR-013: an open microphone is never a quiet state. Recording without a
+        # visible indicator is a prohibited capability, not a UI preference.
+        if self._recording:
+            state, detail = TrayState.RECORDING, "The microphone is open"
+
         # Last, so it outranks everything: a pending approval is the one state
         # the user must notice, and the tray is how a non-modal surface earns
         # that (ADR-0027).
@@ -244,6 +283,12 @@ class JarvisApplication(QObject):
     def send_message(self, text: str) -> None:
         """Run one turn on a worker thread; the model call blocks."""
         panel = self.window.conversation_panel()
+        if self._conversation_worker is not None:
+            # A turn is already in flight. Voice can call this too, so the
+            # disabled input is not on its own enough to prevent a second one.
+            panel.append_note("Still working on the previous message.")
+            return
+
         engine = self._core.conversation
         if not engine.available:
             panel.append_error(engine.unavailable_reason() or "the model is unavailable")
@@ -261,10 +306,46 @@ class JarvisApplication(QObject):
         worker.failed.connect(self._on_turn_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
+        # Ours first, so the references are released before Qt deletes the
+        # thread object. The worker gets no deleteLater: it has no parent, so
+        # Python owns it, and asking Qt to delete it too would delete it twice.
+        thread.finished.connect(self._on_conversation_thread_finished)
         thread.finished.connect(thread.deleteLater)
         self._conversation_thread = thread
+        self._conversation_worker = worker
         thread.start()
+
+    def stop_conversation_thread(self, timeout_ms: int = 5000) -> bool:
+        """Stop the in-flight turn's thread before the process goes away.
+
+        Exiting with it still running takes the process down (a native crash,
+        not an exception). The wait is bounded because ``run`` may be blocked
+        in a model call that ``quit`` cannot interrupt; if it does not stop in
+        time we say so rather than hanging the shutdown.
+        """
+        thread = self._conversation_thread
+        if thread is None:
+            return True
+        thread.quit()
+        stopped = thread.wait(timeout_ms)
+        if not stopped:
+            _LOG.warning(
+                "the conversation thread did not stop within %dms; a model call "
+                "is probably still running",
+                timeout_ms,
+            )
+        self._conversation_worker = None
+        self._conversation_thread = None
+        return stopped
+
+    def _on_conversation_thread_finished(self) -> None:
+        """Release the worker only once its thread has actually stopped.
+
+        Dropping it in ``_on_turn_finished`` destroyed the C++ object while the
+        thread was still shutting down and emitting from it.
+        """
+        self._conversation_worker = None
+        self._conversation_thread = None
 
     def _on_turn_finished(self, turn: object) -> None:
         panel = self.window.conversation_panel()
@@ -372,7 +453,12 @@ class JarvisApplication(QObject):
         _LOG.info("emergency stop via hotkey: %s", report.describe())
 
     def push_to_talk(self) -> None:
-        """Phase 1 stage 3 wires this to capture. Until then it says so."""
+        """F9. Press to start speaking, press again to cut it short.
+
+        Not hold-to-talk: ``RegisterHotKey`` reports the press only, so there is
+        no release to react to. Speech usually ends on its own when the voice
+        activity detector hears silence.
+        """
         toggle = getattr(self.voice, "toggle_push_to_talk", None)
         if toggle is not None:
             toggle()
@@ -424,6 +510,10 @@ class JarvisApplication(QObject):
 
     def quit(self) -> None:
         self._refresh_timer.stop()
+        self.stop_conversation_thread()
+        shutdown = getattr(self.voice, "shutdown", None)
+        if shutdown is not None:
+            shutdown()
         self.bridge.detach()
         self.hotkeys.stop()
         if self.approvals is not None:

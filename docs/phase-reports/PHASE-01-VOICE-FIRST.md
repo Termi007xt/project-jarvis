@@ -209,11 +209,14 @@ the GUI: each surfaces as an honest degraded state.
    fitting and the quality bar exist and are tested; the recording flow and the
    personal verifier do not. The shipped threshold (0.6) is a measured default,
    not a personal one.
-4. **The voice loop is not joined end to end.** Speech-in and speech-out both
-   work; nothing yet wires microphone → transcript → planner → spoken reply as
-   one continuous path.
-5. **The Voice screen reports but does not drive.** Its signals exist; the test
-   meter, calibration and preview buttons are not connected to `VoiceService`.
+4. ~~**The voice loop is not joined end to end.**~~ **Resolved 2026-08-03** —
+   see section 11. Microphone → transcript → planner is now one path, and the
+   loop was verified without a microphone by feeding synthesised speech through
+   the pipeline: `capturing_command → transcribing → off`, transcript
+   `"What is the time?"` at confidence 0.75.
+5. ~~**The Voice screen reports but does not drive.**~~ **Resolved 2026-08-03**
+   — see section 11. This was worse than recorded here: the controls were
+   *enabled* and connected to nothing, which ADR-0010 forbids outright.
 6. **No application has actually been launched.** Deliberate: it opens windows
    on the user's desktop. The vectors are verified, the process probe works, and
    AT-003 passes against a fake.
@@ -258,5 +261,74 @@ missing), ADR-0010 (honest degraded UI, throughout).
 
 ## 10. Corrections
 
-*None. Add dated corrections here if a later discovery invalidates a statement
-above; do not silently edit the record.*
+**2026-08-03 — this report overstated Phase 1.** The project owner's first
+acceptance session found that the Conversation screen produced no reply and that
+no button on the Voice screen did anything. Both were real. Investigating them
+found four more defects, two of which are honesty failures of the kind this
+project treats as more serious than crashes.
+
+The common thread is a testing gap, not a coding one. Every unit under the GUI
+was tested and passed. **Nothing tested the seam between them**, so a screen
+that emitted a signal into the void and an engine that was never called both
+looked healthy. `tests/ui/test_conversation_screen.py` passed in full while the
+screen was completely non-functional.
+
+The specific claim to withdraw: section 4 reported the voice stack as working on
+the strength of the providers working. Speaking was never audible, because
+**there was no audio playback anywhere in the product**.
+
+---
+
+## 11. Post-review defects found and fixed (2026-08-03)
+
+| # | Defect | Root cause | Regression test |
+|---|---|---|---|
+| 1 | Conversation produced no reply, no GPU load and no log line | `ConversationWorker` was a local with no parent QObject; PySide6 destroyed it when `send_message` returned. The thread started, emitted `started`, and the receiver no longer existed. Nothing raised, so nothing was logged | `test_conversation_wiring.py::test_sending_a_message_actually_reaches_the_engine` |
+| 2 | "Thinking…" reverted to "Ready" mid-turn | The 2-second window refresh called `set_availability`, re-enabling input and overwriting the status | `::test_a_turn_in_flight_is_not_re_enabled_by_a_refresh` |
+| 3 | Quitting during a reply took the process down natively (`0xC0000409`), not by exception | Shutdown never waited for the conversation thread | `::test_quitting_mid_turn_stops_the_thread_rather_than_abandoning_it` |
+| 4 | No Voice screen control did anything; F9 always answered "not available on this machine" while the stack was fully installed | `JarvisApplication.voice` was never assigned, and the panel's signals had no receivers. Enabled controls wired to nothing — an ADR-0010 violation | `test_voice_wiring.py::test_every_enabled_button_on_the_voice_screen_has_a_receiver` |
+| 5 | **`voice.speak` reported "Spoken." as `verified` while the room stayed silent** | No playback existed. `VoiceService.speak` synthesised audio and returned it; its docstring said "Playback is the shell's job" and no shell ever did it | `tests/unit/test_speak_tool.py::test_audio_that_was_never_played_is_a_failure_not_a_success` |
+| 6 | Offline mode still made a network request | Kokoro and faster-whisper resolve weights through `huggingface_hub`, which contacts the Hub on load. Observed as "You are sending unauthenticated requests to the HF Hub" — a real remote request from a component presented as local, contrary to AT-001 | `tests/security/test_offline_speech_models.py` |
+
+**Defect 5 is the most serious.** A tool reporting `verified` success for
+something that did not happen is the exact failure FR-048 exists to prevent, and
+it reached the transcript wearing a "confirmed by a tool" label. It survived
+because the tool's tests asserted it returned successfully, never that it
+produced sound.
+
+### What was added
+
+- `jarvis.audio.playback` — the missing half of the stack. Interruptible
+  between 40 ms blocks, which is what `DuplexCoordinator.stop_requested` was
+  already documented as expecting ("polled by the playback loop"). Bounded at
+  300 s. Reports seconds actually written to the device.
+- `jarvis.ui.voice_controller` — joins the service to the shell: push-to-talk,
+  the level meter, the recording indicator, device selection, microphone test,
+  calibration and voice preview. Audio-thread callbacks only ever emit Qt
+  signals; blocking work runs on daemon threads joined with a bound at shutdown.
+- `jarvis.audio.model_hub` — pins the speech model hubs to their local cache in
+  offline mode.
+- Frame observers on `VoicePipeline`, and listener attachment after
+  construction, because the service is built before there is a shell to hand
+  commands to.
+
+### Verified on real hardware
+
+- **Playback**: 4.3 s of `bm_george` through output device 5. Redaction holds
+  aloud — "my api key is sk-live-abcdef123456" was spoken as "my api key is a
+  key".
+- **The voice loop**, without opening the microphone: synthesised speech pushed
+  through the pipeline as capture would deliver it gave
+  `capturing_command → transcribing → off` and the transcript
+  `"What is the time?"` at confidence 0.75, in 3.2 s.
+- **Conversation through the GUI path**: a real reply from `qwen3.5:9b-q4_K_M`
+  in the transcript, labelled `from the local model`.
+
+### Correction to the acceptance guide
+
+Push-to-talk was documented as "hold F9". It never could be: `RegisterHotKey`
+delivers the press only, with no release event. It is press-to-start, and speech
+ends on silence via the voice activity detector.
+
+**Suite after these fixes: 745 passed, 2 skipped** (was 698). Security: 168
+passed, 1 skipped.

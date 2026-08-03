@@ -127,17 +127,33 @@ class ConversationPanel(QWidget):
 
         self._thread: QThread | None = None
         self._worker: ConversationWorker | None = None
+        self._busy = False
+        self._available = True
+        self._reason: str | None = None
 
     # -- state -------------------------------------------------------------
     def set_availability(self, available: bool, reason: str | None) -> None:
-        """Enable or disable input, and say exactly why when disabled."""
-        self.input.setEnabled(available)
-        self.send_button.setEnabled(available)
-        if available:
+        """Enable or disable input, and say exactly why when disabled.
+
+        The window refreshes every two seconds. While a turn is in flight that
+        refresh must not re-enable the input or replace "Thinking…", so the
+        availability is remembered and applied once the turn ends.
+        """
+        self._available = available
+        self._reason = reason
+        if self._busy:
+            return
+        self._apply_state()
+
+    def _apply_state(self) -> None:
+        self.input.setEnabled(self._available)
+        self.send_button.setEnabled(self._available)
+        if self._available:
             self.status.setText("Ready. Answers are labelled with where they came from.")
         else:
             self.status.setText(
-                reason or "The local model is not reachable, so Jarvis cannot converse."
+                self._reason
+                or "The local model is not reachable, so Jarvis cannot converse."
             )
 
     def set_private(self, private: bool) -> None:
@@ -181,10 +197,17 @@ class ConversationPanel(QWidget):
         self.sendRequested.emit(text)
 
     def set_busy(self, busy: bool) -> None:
-        self.input.setEnabled(not busy)
-        self.send_button.setEnabled(not busy)
+        self._busy = busy
         if busy:
+            self.input.setEnabled(False)
+            self.send_button.setEnabled(False)
             self.status.setText("Thinking…")
+        else:
+            self._apply_state()
+
+    @property
+    def busy(self) -> bool:
+        return self._busy
 
     def transcript_text(self) -> str:
         return self.transcript.toPlainText()

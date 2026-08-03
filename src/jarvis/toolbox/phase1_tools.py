@@ -362,8 +362,8 @@ class SpeakTool:
         timeout_seconds=120.0,
         retry_policy=RetryPolicy(max_attempts=1),
         changes_state=False,
-        verification="Reports the audio that was produced.",
-        failure_codes=("voice_unavailable", "synthesis_failed"),
+        verification="Reports how much audio actually reached the output device.",
+        failure_codes=("voice_unavailable", "synthesis_failed", "playback_failed"),
         redaction_keys=(),
         reversible=True,
     )
@@ -380,15 +380,41 @@ class SpeakTool:
                 "no voice is available, so nothing was spoken. The Voice screen "
                 "says what is missing.",
             )
+
+        # Synthesising is not speaking. This tool reported "Spoken." on the
+        # strength of having produced audio, while nothing played it — a
+        # verified success for a silent room (PRD FR-048).
+        playback = getattr(result, "playback", None)
+        if playback is None:
+            raise ToolFailure(
+                "playback_failed",
+                "the voice service returned audio but no playback report, so "
+                "there is no evidence anything was heard.",
+            )
+        if not playback.played:
+            raise ToolFailure(
+                "playback_failed",
+                f"the words were synthesised but not played: {playback.error or 'no audio reached the output device'}",
+            )
+
+        redacted = bool(getattr(result, "redacted", False))
+        message = f"Spoken aloud ({playback.seconds:.1f}s)."
+        if playback.interrupted:
+            message = f"Started speaking, then stopped when you interrupted ({playback.seconds:.1f}s)."
+        if redacted:
+            message += " Sensitive content was removed first."
         return ToolExecution(
             output=SpeakOutput(
                 spoken=True,
-                redacted=bool(getattr(result, "redacted", False)),
-                seconds=round(getattr(result.audio, "duration_seconds", 0.0), 2),
+                redacted=redacted,
+                seconds=round(playback.seconds, 2),
                 voice=str(getattr(result, "voice_id", "")),
             ),
+            # Verified means the audio really was written to the output device,
+            # which is the strongest observation available here. Whether the
+            # speakers were on is not something Jarvis can see.
             verification=Verification.VERIFIED,
-            message="Spoken." + (" Sensitive content was removed first." if getattr(result, "redacted", False) else ""),
+            message=message,
         )
 
 

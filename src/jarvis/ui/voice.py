@@ -28,12 +28,23 @@ from PySide6.QtWidgets import (
 )
 
 from jarvis.audio.availability import VoiceStackStatus
+from jarvis.audio.pipeline import ListeningState
 from jarvis.audio.wake import DESIRED_PHRASE, PHASE_1_PHRASE, phrase_disclosure
 from jarvis.audio.wake_install import LICENCE_WARNING
 
 __all__ = ["VoicePanel"]
 
 _LOG = logging.getLogger(__name__)
+
+#: What each listening state means, in words the user can act on. FR-013 makes
+#: "Jarvis is recording" something that must always be visible, not inferred.
+_LISTENING_WORDING: dict[str, str] = {
+    ListeningState.OFF.value: "Not listening. Press F9 to talk.",
+    ListeningState.WAITING_FOR_WAKE.value: 'Listening for "Hey Jarvis".',
+    ListeningState.CAPTURING_COMMAND.value: "Recording — speak now.",
+    ListeningState.TRANSCRIBING.value: "Transcribing what you said…",
+    ListeningState.SPEAKING.value: "Jarvis is speaking.",
+}
 
 
 class VoicePanel(QWidget):
@@ -100,8 +111,15 @@ class VoicePanel(QWidget):
         layout.addWidget(self.licence_warning)
 
         enrolment_row = QHBoxLayout()
-        self.enrol_button = QPushButton("Record wake-word samples")
+        # Not built in this build. ADR-0010: shown disabled and naming its
+        # phase, never hidden and never appearing to work.
+        self.enrol_button = QPushButton("Record wake-word samples  ·  Phase 2")
         self.enrol_button.setAccessibleName("Record wake-word samples")
+        self.enrol_button.setEnabled(False)
+        self.enrol_button.setToolTip(
+            "Personal wake-word enrolment is not implemented yet (ADR-0016 "
+            "criterion 2). Push-to-talk works now."
+        )
         self.enrol_button.clicked.connect(self.enrolRequested.emit)
         enrolment_row.addWidget(self.enrol_button)
 
@@ -140,6 +158,11 @@ class VoicePanel(QWidget):
         self.meter.setAccessibleName("Microphone level")
         layout.addWidget(self.meter)
 
+        self.listening_label = QLabel(_LISTENING_WORDING[ListeningState.OFF.value])
+        self.listening_label.setWordWrap(True)
+        self.listening_label.setAccessibleName("Listening state")
+        layout.addWidget(self.listening_label)
+
         self.calibration_label = QLabel("Not calibrated yet.")
         self.calibration_label.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.calibration_label)
@@ -174,8 +197,13 @@ class VoicePanel(QWidget):
         lines = [component.describe() for component in status.components]
         self.stack_status.setText("\n".join(lines))
         installed = status.capture.available
-        for control in (self.test_button, self.calibrate_button, self.enrol_button):
+        for control in (self.test_button, self.calibrate_button):
             control.setEnabled(installed)
+            if not installed:
+                control.setToolTip(status.capture.detail or "No microphone is available.")
+        # Never re-enabled here: enrolment is unimplemented, not merely blocked
+        # by a missing microphone (ADR-0010).
+        self.enrol_button.setEnabled(False)
         self.preview_button.setEnabled(status.text_to_speech.available)
 
     def set_model_state(self, directory: object, installed: bool, detail: str) -> None:
@@ -186,6 +214,11 @@ class VoicePanel(QWidget):
             "Reinstall wake-word model" if installed else "Install wake-word model"
         )
         self.remove_model_button.setEnabled(installed)
+        self.remove_model_button.setToolTip(
+            f"Deletes the downloaded models from {directory}."
+            if installed
+            else "There is no wake-word model installed to remove."
+        )
 
     def set_phrase(self, phrase: str, *, enrolled: bool) -> None:
         """State the phrase literally. Never label it 'Jarvis' (FR-011)."""
@@ -250,6 +283,16 @@ class VoicePanel(QWidget):
 
     def set_level(self, level: float) -> None:
         self.meter.setValue(max(0, min(100, int(level * 400))))
+
+    def set_listening_state(self, state: str) -> None:
+        """Say plainly whether the microphone is open (PRD FR-013)."""
+        self.listening_label.setText(
+            _LISTENING_WORDING.get(state, f"Listening state: {state}")
+        )
+        recording = state == ListeningState.CAPTURING_COMMAND.value
+        self.listening_label.setStyleSheet(
+            "color: #b91c1c; font-weight: 600;" if recording else "color: palette(mid);"
+        )
 
     def set_calibration(self, description: str) -> None:
         self.calibration_label.setText(description)

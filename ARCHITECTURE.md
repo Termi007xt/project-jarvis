@@ -106,10 +106,28 @@ Process: jarvis.exe  (per-user, asInvoker, single instance)
 │
 ├── Thread: TaskScheduler            — dequeue, lock arbitration, run steps
 ├── Thread pool: task runners        — bounded, one step at a time per task
-├── Thread: Audio Worker             — Phase 1
+├── Thread: audio capture            — Phase 1, owned by sounddevice
+│     · delivers 80 ms frames to VoicePipeline.push_frame
+│     · NEVER touches a widget: callbacks emit Qt signals, delivered queued
+├── Thread: conversation turn        — Phase 1, one QThread per turn
+│     · the model call blocks; the worker is referenced until the thread ends
+│     · awaited with a bound on quit — exiting with it running crashes natively
+├── Threads: voice actions           — Phase 1, daemon, joined with a bound
+│     · transcription, synthesis, calibration; all block for seconds
+├── Thread: global hotkeys           — Win32 RegisterHotKey + GetMessageW
 ├── Thread: Automation Worker        — Phase 2
 └── Thread: health / diagnostics     — periodic Ollama + vault checks
 ```
+
+Two threading rules earned their place by being broken:
+
+1. **A `QObject` moved to a `QThread` must be referenced for the thread's whole
+   life.** It has no parent, so PySide6 destroys it as soon as the last Python
+   reference goes; the thread then starts, emits `started`, and finds no
+   receiver. Nothing raises and nothing is logged.
+2. **The process must not exit with a `QThread` still running.** That is a
+   native crash (`0xC0000409`), not an exception, so shutdown waits for it with
+   a bound.
 
 The rule that makes this safe is stated once and enforced everywhere:
 **`jarvis.core`, `jarvis.tasks`, `jarvis.storage`, `jarvis.llm` and
@@ -654,11 +672,12 @@ producing a warning.
 
 ## 12. What exists today
 
-Phase 0 was foundation and safety architecture only. Phase 1 stages 1–3 have
-since added the approval dialog, the secret store, conversation and the voice
-stack. There is still **no desktop or browser automation**: no filesystem tools,
-no screen capture, no clipboard access, and no application launching (the last
-of these is gated on ADR-0029, not merely unbuilt).
+Phase 0 was foundation and safety architecture only. Phase 1 has since added the
+approval dialog, the secret store, conversation, the voice stack and the six
+approved tools. There is still **no general desktop or browser automation**: no
+filesystem tools, no screen capture, no clipboard access, and no input synthesis
+beyond the fixed media-key table. Launching an approved application goes through
+the single call site ADR-0029 authorises.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -690,8 +709,11 @@ of these is gated on ADR-0029, not merely unbuilt).
 | History and private sessions | Implemented (Phase 1) | a private session writes nothing at all; `secure_delete` makes deletion real |
 | Personality profile and proposals | Implemented (Phase 1) | user-editable; a proposal changes nothing until accepted (§4.4) |
 | Voice: capture, ring buffer, VAD, STT, TTS, barge-in | Implemented (Phase 1) | optional `voice` extra, lazily imported; verified on this hardware |
-| Wake-word detection and enrolment | Not implemented | needs the openWakeWord base model (ADR-0016); push-to-talk is the route meanwhile |
-| Application launcher, browser, media, volume, notify tools | Not implemented | Phase 1 stage 4; the launcher is gated on ADR-0029 |
+| Audio playback (`jarvis.audio.playback`) | Implemented (Phase 1) | interruptible between 40 ms blocks, bounded at 300 s, reports seconds actually written. Previously absent, which made every "Spoken." claim false |
+| Voice ↔ shell wiring (`jarvis.ui.voice_controller`) | Implemented (Phase 1) | push-to-talk, level meter, recording indicator, device choice, mic test, calibration, preview |
+| Wake-word base model | Implemented (Phase 1) | openWakeWord `hey_jarvis` ONNX, installed via `--install-wake-model`, never bundled; non-commercial licence |
+| Per-user wake enrolment | Not implemented | ADR-0016 Path 1; always-listening stays off without it, and the button is disabled and says so |
+| Application launcher, browser, media, volume, speak, notify tools | Implemented (Phase 1) | six narrow typed tools; the launcher is the one call site ADR-0029 authorises |
 | Automation, vision, memory, skills | Not implemented | Phases 2–4 |
 
 ---

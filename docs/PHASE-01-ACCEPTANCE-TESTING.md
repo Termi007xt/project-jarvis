@@ -1,7 +1,13 @@
 # Phase 1 — user acceptance testing
 
-Everything an automated test could check is checked: **698 passed, 2 skipped**.
+Everything an automated test could check is checked: **745 passed, 2 skipped**.
 What remains needs a human, a microphone and a real desktop. This is that list.
+
+> **Revised 2026-08-03 after your first session.** You found that Conversation
+> produced no reply and that no Voice button worked. Both were real, and
+> investigating them turned up three more defects. All are fixed; what changed
+> is listed in "What was broken and is now fixed" at the end. **Sections 3, 7
+> and 8 are the ones to re-run** — the rest was unaffected.
 
 Work through it in order. Each item says what to run, what you should see, and
 what to tell me. **Where something is expected to be imperfect, it says so** —
@@ -184,7 +190,13 @@ or annoying?
 
 ## 7. Voice output
 
-**Voice** screen → pick a voice → **Preview**.
+> **This did not work at all in your first session** — there was no audio
+> playback anywhere in the product. Synthesis ran and the result was discarded.
+> Playback now exists and I verified it here: 4.3 seconds of `bm_george` came
+> out of output device 5.
+
+**Voice** screen → pick a voice → **Preview**. The first press loads Kokoro and
+takes ~20 seconds; after that it is quick.
 
 Then from Conversation: `Say hello to me out loud`.
 
@@ -192,7 +204,11 @@ Then from Conversation: `Say hello to me out loud`.
 - Did you hear `bm_george`? How does it sound?
 - Try: `Say out loud: my api key is sk-live-abcdef123456`.
   **Expect** it speaks "my api key is **a key**" — the secret must not be read
-  aloud. Tell me exactly what it said.
+  aloud. I verified this exact case here and it said "my api key is a key".
+  Tell me if yours differs.
+- Jarvis should now say **"Spoken aloud (2.8s)"** rather than just "Spoken." If
+  you ever see it claim it spoke while you heard nothing, that is a defect and I
+  want to know immediately.
 
 ---
 
@@ -202,9 +218,26 @@ Then from Conversation: `Say hello to me out loud`.
 
 ### 8.1 Push-to-talk (the verified route)
 
-Hold **F9**, say `what is the time`, release.
+> **Correction to the previous guide: it is not hold-to-talk.** `RegisterHotKey`
+> reports the key *press* only — Windows gives no release event — so holding F9
+> was never going to work. It is press-to-start.
 
-**Report:** did it transcribe correctly? Was the transcript accurate?
+1. **Press F9** (do not hold). A notification says "Listening", the tray turns
+   to the recording state, and the Voice screen says **"Recording — speak now."**
+2. Say `what is the time`.
+3. **Stop talking.** It ends by itself when it hears silence. Press F9 again to
+   cut it short.
+
+The transcript is then sent to Conversation as an ordinary turn, and the window
+comes to the front showing it.
+
+**Report:**
+- Did it transcribe correctly? Paste what appeared.
+- Did the tray and the Voice screen both show that the microphone was open?
+  **If the microphone ever opens with nothing on screen saying so, stop and tell
+  me** — recording without a visible indicator is a prohibited capability, not a
+  cosmetic issue.
+- How long did the first one take? (It loads Whisper; ~3 seconds after that.)
 
 ### 8.2 The wake word
 
@@ -235,6 +268,30 @@ talks.
   self-trigger problem ADR-0028 names, and I have no real measurement of it.
   If it loops or talks over itself, say so and I will degrade it to half-duplex,
   which is implemented and honest.
+
+---
+
+## 8.4 The Voice screen controls
+
+> **None of these were connected in your first session.** Every button emitted a
+> signal that nothing listened to, so clicking did nothing at all — no action,
+> no error. They are wired now, except enrolment, which is genuinely not built
+> and is therefore greyed out and labelled.
+
+| Control | Expect |
+|---|---|
+| **Microphone** dropdown | Selecting a device switches it; if it fails to open, it says so |
+| **Test** | Opens the mic for 5 seconds. **The meter moves as you speak**, then it closes itself |
+| **Calibrate for this room** | Asks you to stay quiet for 3 seconds, then reports the noise floor |
+| **Preview** | Speaks a sample line in the selected voice |
+| **Record wake-word samples** | **Greyed out**, labelled "Phase 2", tooltip says why |
+| **Enable always-listening** | **Greyed out** — it needs an enrolment that does not exist yet |
+
+**Report:**
+- Does the meter actually move when you speak during **Test**?
+- What noise floor did **Calibrate** report?
+- Did any button do nothing at all, with no message? That is the defect class I
+  was fixing, so I want to hear about any survivor.
 
 ---
 
@@ -275,7 +332,28 @@ python -c "import sys; sys.path.insert(0,'src'); from jarvis.runtime import star
   did not. That matters more to me than a crash.
 - **Anything that felt slow.** First voice use loads models and will be slow;
   the second should not be.
-- The log at `%LOCALAPPDATA%\ProjectJarvis\logs\jarvis.log` if something broke.
+- The log at `%LOCALAPPDATA%\ProjectJarvis\logs\app.log` if something broke.
+  (The previous guide named `jarvis.log`, which does not exist.)
+
+---
+
+## What was broken and is now fixed
+
+Everything here came out of the two things you reported. Each has a regression
+test, named after the defect rather than the function.
+
+| # | What you saw | Root cause | Fix |
+|---|---|---|---|
+| 1 | Conversation gave no reply, no GPU use, nothing in the log | The worker object had no parent and no Python reference, so PySide6 destroyed it the instant `send_message` returned. The thread started, emitted `started`, and the receiver was already gone. Nothing failed, so nothing was logged | Hold the reference until the thread finishes |
+| 2 | The screen went back to "Ready" as if nothing happened | The 2-second refresh timer overwrote the "Thinking…" state and re-enabled the input | The panel owns its busy state; a refresh cannot override a turn in flight |
+| 3 | *(not visible to you)* Quitting mid-reply would have killed the process | Shutdown never waited for the conversation thread. Exiting with it running is a native crash, not an exception | Bounded wait on quit |
+| 4 | No Voice button did anything | The Voice screen's signals were connected to nothing, and the shell never joined the voice service at all — `application.voice` stayed `None`, so F9 always answered "not available on this machine" while the whole stack was installed | A voice controller now joins them; a test asserts every enabled button has a receiver |
+| 5 | *(not visible to you)* "Spoken." was a lie | **There was no audio playback anywhere in the product.** `voice.speak` synthesised audio, discarded it, and reported success as `verified` | Playback implemented and interruptible; the tool now fails honestly if nothing reached the output device |
+| 6 | *(not visible to you)* Offline mode still made a network request | Kokoro and Whisper resolve weights through the HuggingFace Hub, which contacts it on load — visible as "You are sending unauthenticated requests to the HF Hub" | Offline mode pins both to their local cache (AT-001) |
+
+Defect 5 is the one I would most like you to check my work on. It is exactly the
+failure FR-048 exists to prevent, and it survived because nothing tested that
+`voice.speak` produced sound — only that it returned successfully.
 
 ---
 
@@ -284,10 +362,13 @@ python -c "import sys; sys.path.insert(0,'src'); from jarvis.runtime import star
 If you only have twenty minutes, do these five:
 
 1. `python -m jarvis.main --check` → send me the block
-2. Conversation 3.2 and 3.3 → does it label sources and refuse honestly?
-3. The approval prompt → **does it steal your keyboard focus?**
-4. `Open Brave` → does it open, and does Xbox/Sea of Thieves work?
-5. Wake word 8.2 → the four counts
+2. **Conversation: type `Hello` and confirm a reply actually arrives.** This is
+   the one that was completely broken
+3. **Press F9** (do not hold), say something, and see whether it transcribes
+4. **Voice → Preview** → do you actually hear George?
+5. The approval prompt (`Open Brave`) → **does it steal your keyboard focus?**
+
+Then, if you have longer, the wake-word counts in 8.2.
 
 ---
 
