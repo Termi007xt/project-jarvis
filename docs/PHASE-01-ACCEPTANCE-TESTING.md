@@ -102,6 +102,24 @@ an approval prompt. See section 4.
 **Specifically tell me if** any reply claims something was done that was not.
 That is the failure mode FR-048 exists to prevent and I want to know immediately.
 
+**Also tell me if any reply arrives completely blank.** That happened twice in
+your last session, under a confident source label, which is indistinguishable
+from being ignored. An empty answer should now explain itself — and say what its
+tools did, if any ran — rather than rendering the silence as an answer.
+
+> `what time is it?` will still not give you the time. Jarvis has no clock tool,
+> so it can only answer from the model, which does not know. That is a missing
+> capability, not a defect, and it is on the list.
+
+### 3.4a Your name
+
+Type a name into the **Your name** field on the Conversation screen.
+
+**Expect:** the transcript says `Maulik:` instead of `You:`, it survives a
+restart, and Jarvis knows it — ask `what is my name?`.
+
+**Report:** did it persist across a restart, and did the model actually use it?
+
 ### 3.5 Private session
 
 1. Tick **Private session**.
@@ -151,9 +169,26 @@ From Conversation, or the Developer tools screen:
 |---|---|
 | `Open Brave` | Brave opens. Jarvis says so **only after** it verifies the process |
 | `Open YouTube` | Brave opens at youtube.com |
-| `Open YouTube Music` | Brave opens at music.youtube.com |
+| `Open YouTube Music` | **The installed app opens in its own window** — not a Brave tab |
+| `Open Steam` | The Steam client opens (no game needed) |
 | `Open Xbox` | The Xbox app opens |
 | `Open Sea of Thieves` | The game launcher starts |
+
+> **YouTube Music changed.** It used to hand `music.youtube.com` to Brave, which
+> is a tab by definition. It now launches the progressive web app you installed
+> and pinned, by the same app id the Start-menu shortcut uses. If it opens as a
+> tab, or does not open at all, tell me — the app id is a seed value and easy to
+> correct.
+
+**Searching**, which is new:
+
+| Ask | Expect |
+|---|---|
+| `Search for upcoming games in 2027` | A DuckDuckGo results page, correctly encoded |
+| `Search YouTube for RTX 5070 reviews` | A YouTube results page |
+
+> Jarvis says outright that it cannot read the results. It opens the page; the
+> reading is Phase 2.
 
 **Also try these, which must fail:**
 
@@ -294,17 +329,66 @@ Measure roughly:
 **Report:** those four numbers. They decide whether always-listening is safe to
 enable, and I will adjust the threshold from them.
 
-### 8.3 Barge-in (expected to be imperfect)
+### 8.3 Interrupting it
 
-Ask something with a long answer, and **interrupt it by speaking** while it
-talks.
+> **This never worked, for three separate reasons.** The threshold a detection
+> had to clear while Jarvis was speaking was 0.96, which the detector does not
+> reach; the self-echo check compared your microphone's level against the volume
+> of Jarvis's own audio data, which are not the same kind of measurement; and
+> emergency stop did not stop speech at all. All three are fixed. None of them
+> is *measured*, which is why this section now has two halves.
+
+**The routes that do not depend on tuning.** Try these first — they should work
+every time, in any state, including with the microphone closed:
+
+| Route | Expect |
+|---|---|
+| **`Ctrl+Alt+End`** | Speech stops immediately, and all automation stops |
+| Tray → **Stop speaking** | Speech stops. **Nothing else stops** — no task is cancelled |
+
+**Report:** did each stop it mid-word, or only at the end of the sentence?
+
+**The acoustic route.** This needs listening turned on — with the microphone
+closed there is nothing to hear you, and the Voice screen now says so rather
+than claiming Jarvis is interruptible. Ask for something with a long answer and
+say **"Hey Jarvis"** over the top of it.
 
 **Report:**
-- Did it stop speaking?
+- Did it stop speaking? How far into your interruption?
 - **Did it ever interrupt itself** — react to its own voice? This is the
-  self-trigger problem ADR-0028 names, and I have no real measurement of it.
-  If it loops or talks over itself, say so and I will degrade it to half-duplex,
-  which is implemented and honest.
+  self-trigger problem ADR-0028 names, and I still have no real measurement of
+  it. If it loops or talks over itself, say so and I will degrade it to
+  half-duplex, which is implemented and honest.
+
+---
+
+### 8.5 What it says, and when it says it
+
+Two changes you asked for after the last round.
+
+**It should not narrate things you can see.** Say **"open Brave"**. Expect a
+short two-tone cue and *no sentence* — the window is the proof. Then ask
+**"what's the volume?"**: that runs a tool too, and it should still answer out
+loud, because you asked for information rather than giving an instruction.
+
+| You say | Expect |
+|---|---|
+| "open Brave" | Cue only |
+| "what time is it?" | Spoken answer |
+| Anything that fails | Spoken, always |
+| A question back from Jarvis | Spoken, always |
+| Anything you **type** | Never spoken, whatever the setting |
+
+`audio.speak_replies` overrides this: `always`, `when_useful` (default),
+`never`.
+
+**It should not read out emoji and formatting.** Ask for something the model
+will decorate — "give me three tips for using you, with emoji". Expect the
+transcript to keep every character and the *spoken* version to contain no "lion
+face", no "asterisk asterisk", and no spelled-out web address. A link should be
+read as its host: "music dot youtube dot com".
+
+**Report:** anything it said out loud that was not a word.
 
 ---
 
@@ -421,6 +505,10 @@ Then, if you have longer, the wake-word counts in 8.2.
 |---|---|
 | Wake-word counts | I tune the threshold, or leave always-listening off |
 | Barge-in self-triggers | I degrade to half-duplex and say so in the GUI |
+| `Ctrl+Alt+End` does not stop speech | A real regression — tell me at once |
+| YouTube Music opens as a tab | One-line app-id fix |
+| Anything non-word spoken aloud | Add it to the strip list |
+| The cue-instead-of-speech rule guesses wrong | I adjust the rule, not the model |
 | Wrong Xbox / Sea of Thieves AUMID | One-line catalogue fix |
 | F9 is intolerable | Change the default to something with a modifier |
 | Any dishonest status | Treated as a defect, fixed before Phase 2 |

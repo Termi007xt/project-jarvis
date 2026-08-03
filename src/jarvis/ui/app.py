@@ -24,6 +24,7 @@ from jarvis.core.events.types import (
     TaskStateChanged,
 )
 from jarvis.audio.cues import Cue
+from jarvis.audio.reply_policy import ReplyVoice, SpeakReplies, should_speak
 from jarvis.runtime.core import JarvisCore
 from jarvis.runtime.hotkeys import GlobalHotkeys
 from jarvis.tasks.states import TaskState
@@ -165,6 +166,7 @@ class JarvisApplication(QObject):
         self.tray.settingsRequested.connect(lambda: self.show_window("developer"))
         self.tray.quitRequested.connect(self.quit)
         self.tray.emergencyStopRequested.connect(self.emergency_stop)
+        self.tray.stopSpeakingRequested.connect(self.stop_speaking)
         self.tray.offlineModeToggled.connect(self.set_offline_mode)
         self.tray.pauseRequested.connect(self._pause_current)
         self.tray.resumeRequested.connect(self._resume_current)
@@ -401,8 +403,7 @@ class JarvisApplication(QObject):
         if not getattr(turn, "ok", False):
             message = getattr(turn, "error", "") or "no answer"
             panel.append_error(message)
-            if spoken:
-                self._say(f"That did not work. {message}")
+            self._answer(turn, spoken, ok=False, text=f"That did not work. {message}")
         else:
             panel.append_reply(turn.reply, turn.label)  # type: ignore[attr-defined]
             for refusal in getattr(turn, "refused_proposals", ()):
@@ -410,16 +411,35 @@ class JarvisApplication(QObject):
             review = getattr(turn, "review", None)
             if review is not None and review.amended:
                 panel.append_note(review.note or "")
-            # Asked by voice, answered by voice. Anything else means walking to
-            # the window to read the reply, which is the opposite of the point.
-            if spoken:
-                self._say(turn.reply)  # type: ignore[attr-defined]
+            # Asked by voice, answered by voice — but only when the answer is
+            # worth hearing. "Open Brave" gets a cue; the window is the proof.
+            self._answer(turn, spoken, ok=True, text=turn.reply)  # type: ignore[attr-defined]
         self.window.refresh_conversation()
+
+    def _answer(self, turn: object, spoken: bool, *, ok: bool, text: str) -> None:
+        """Speak, beep or stay quiet, per ``audio.speak_replies``."""
+        decision = should_speak(
+            spoken_request=spoken,
+            policy=getattr(self._core.config.audio, "speak_replies", SpeakReplies.WHEN_USEFUL),
+            request=getattr(turn, "user_text", ""),
+            reply=text,
+            tool_results=getattr(turn, "tool_results", ()),
+            ok=ok,
+        )
+        if decision is ReplyVoice.SPEAK:
+            self._say(text)
+        elif decision is ReplyVoice.CUE:
+            self._cue(Cue.DONE if ok else Cue.FAILED)
 
     def _say(self, text: str) -> None:
         speak = getattr(self.voice, "speak_reply", None)
         if speak is not None:
             speak(text)
+
+    def _cue(self, name: str) -> None:
+        cue = getattr(self.voice, "play_cue", None)
+        if cue is not None:
+            cue(name)
 
     def _on_turn_failed(self, message: str) -> None:
         spoken, self._answer_aloud = self._answer_aloud, False
@@ -429,7 +449,7 @@ class JarvisApplication(QObject):
         if spoken:
             # A failure the user cannot see is a failure they will not know
             # about at all, since the window is not raised for voice.
-            self._say("Sorry, that did not work.")
+            self._answer(None, spoken, ok=False, text="Sorry, that did not work.")
             self.tray.notify("Jarvis could not answer", message)
 
     def set_private_session(self, private: bool) -> None:
@@ -545,6 +565,10 @@ class JarvisApplication(QObject):
             _LOG.warning("no action for hotkey '%s'", name)
 
     def emergency_stop_from_hotkey(self) -> None:
+        # Speech first: it is the part of "stop" the user can actually hear,
+        # and leaving Jarvis talking over a stopped runtime is the opposite of
+        # what a panic key means.
+        self.stop_speaking("emergency stop")
         report = self._core.emergency_stop(origin="hotkey")
         _LOG.info("emergency stop via hotkey: %s", report.describe())
 
@@ -575,8 +599,22 @@ class JarvisApplication(QObject):
         self.window.refresh_all()
 
     def emergency_stop(self) -> None:
+        self.stop_speaking("emergency stop")
         report = self._core.emergency_stop(origin="tray")
         _LOG.info("emergency stop: %s", report.describe())
+
+    def stop_speaking(self, reason: str = "the user asked Jarvis to stop") -> bool:
+        """Interrupt speech, and nothing else (ADR-0028).
+
+        Deliberately not routed through ``JarvisCore.emergency_stop``: that
+        cancels tasks and releases locks, which is the wrong price for "be
+        quiet". Playback checks between 40 ms blocks, so this takes effect
+        within one block rather than at the end of the sentence.
+        """
+        stop = getattr(self.voice, "stop_speaking", None)
+        if stop is None:
+            return False
+        return bool(stop(reason))
 
     def set_offline_mode(self, offline: bool) -> None:
         mode = NetworkMode.OFFLINE if offline else NetworkMode.LOCAL_ASSISTANT

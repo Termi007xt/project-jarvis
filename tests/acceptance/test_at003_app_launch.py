@@ -120,7 +120,9 @@ def test_an_application_outside_the_catalogue_is_refused(
     [
         ("Brave", "brave.exe"),
         ("YouTube", "youtube.com"),
-        ("YouTube Music", "music.youtube.com"),
+        # Deliberately the installed web app rather than a tab: the user
+        # installed and pinned it, and "open YouTube Music" means that window.
+        ("YouTube Music", "--app-id="),
         ("Xbox", "Microsoft.GamingApp"),
         ("Sea of Thieves", "Microsoft.SeaofThieves"),
     ],

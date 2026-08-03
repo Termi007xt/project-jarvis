@@ -1,20 +1,35 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-03
+- **Last updated:** 2026-08-04
 - **Current branch:** `feat/PHASE-1-development`
-- **HEAD commit:** `2e3a0d9` + uncommitted GUI-seam fixes (see below)
-- **Active phase:** **Phase 1 — awaiting a second user acceptance session**
-- **Overall status:** Amber, improving. `python -m pytest` → **745 passed,
-  2 skipped** (Phase 0 baseline 386; before this round 698). Nothing is blocked.
+- **HEAD commit:** `40fd50c` + uncommitted voice-behaviour fixes (round 6)
+- **Active phase:** **Phase 1 — in user acceptance testing, round 6**
+- **Overall status:** Amber, improving. `python -m pytest` → **907 passed,
+  2 skipped** (Phase 0 baseline 386; 698 → 745 → 832 → 907). Nothing is blocked.
 
-**The first acceptance session (2026-08-03) failed.** The Conversation screen
-produced no reply and no Voice screen control did anything. Both were real
-defects; investigating them found four more, including one honesty failure:
-`voice.speak` reported `verified` success while **no audio playback existed
-anywhere in the product**. All six are fixed, each with a regression test named
-after the defect. Full account in
-`docs/phase-reports/PHASE-01-VOICE-FIRST.md` sections 10 and 11.
+**Acceptance testing is running as rounds against real use**, each one reporting
+defects that the unit suites did not catch. Rounds 1–5 are recorded in
+`docs/phase-reports/PHASE-01-VOICE-FIRST.md` sections 10 and 11. Round 6
+(2026-08-04) came from the owner's own list and covered four things:
+
+1. **Emoji and formatting were being read out** — the phonemiser expands every
+   character to its Unicode name, so "🦁" was spoken as "lion face".
+   `speakable_text()` strips presentation before synthesis, and runs before
+   redaction so markdown cannot hide a credential from the FR-034 patterns.
+2. **Jarvis could not be interrupted**, for three independent reasons: an
+   unreachable raised threshold (0.96 required), a self-echo test comparing a
+   microphone level against our own output samples, and an emergency stop that
+   never stopped speech. See the ADR-0028 amendment of 2026-08-04.
+3. **It narrated instructions that spoke for themselves.** `audio.speak_replies`
+   and `jarvis.audio.reply_policy` decide speak / cue / silent in code —
+   deliberately not asked of the model, because that drift is invisible.
+4. **"Open YouTube Music" opened a browser tab** rather than the installed web
+   app. One catalogue entry, launched by app id; no new call site, so ADR-0029
+   is untouched.
+
+The owner's decision on the fifth item is recorded below: opening arbitrary
+applications with first-use permission is **deferred**, not declined.
 
 **The lesson, recorded so it changes behaviour:** every unit passed while the
 product did not work, because nothing tested the *seam* between the GUI and the
@@ -120,17 +135,20 @@ installed as the optional `voice` extra, and the wake-word model was obtained.
 
 **What is unproven rather than blocked** — the distinction matters:
 
-1. **Nobody has spoken into a real microphone.** Wake detection, VAD and
-   barge-in are exercised against synthetic frames and synthesised speech only.
+1. **The false-wake rate is unmeasured.** Wake detection has been exercised by
+   hand but not counted over a normal hour of talking, which is what decides the
+   threshold and whether always-listening is safe to leave on.
 2. **Barge-in self-trigger rate is unmeasured**, which ADR-0028 makes the gate
-   on relying on it. The honest half-duplex fallback is implemented for if it
-   proves unreliable.
+   on relying on it. Until 2026-08-04 it could not have been measured at all —
+   the thresholds made acoustic barge-in unreachable. The honest half-duplex
+   fallback is implemented for if it proves unreliable, and the keyboard routes
+   do not depend on the measurement.
 3. **The Xbox and Sea of Thieves AUMIDs are unverified.** They build the correct
    broker vector, but launching them would open windows on the user's desktop,
    so it belongs in acceptance testing.
 
 ## Tests and Quality Checks
-- **Last successful:** `python -m pytest` → **698 passed, 2 skipped** (2026-08-02).
+- **Last successful:** `python -m pytest` → **907 passed, 2 skipped** (2026-08-04).
   The two skips are the non-Windows branches of the secret store, which cannot
   run on this platform by definition.
 - **Last failed:** none.
@@ -215,26 +233,31 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-1. **A second user acceptance session.** `docs/PHASE-01-ACCEPTANCE-TESTING.md`
-   is the script, revised 2026-08-03 after the first session failed. **Phase 2
-   does not start until this is done.** Sections 3, 7 and 8 are the ones to
-   re-run — they cover everything that was broken. The five that matter most:
-   the `--check` block, **whether a typed message now gets a reply at all**,
-   whether F9 (press, not hold) transcribes, whether Voice → Preview is
-   audible, and whether the approval prompt steals keyboard focus.
+1. **The false-wake count.** Listening on, an hour of normal talking, how many
+   times did it wake by mistake? This is the outstanding measurement and it
+   decides two things: whether the 0.6 threshold stays, and whether
+   always-listening is safe to leave on — which is also the precondition for
+   acoustic barge-in, since a closed microphone cannot hear an interruption.
 
-2. **Act on the wake-word counts.** They decide whether always-listening can be
-   enabled at all, and what threshold it uses. The shipped 0.6 is a measured
-   default from synthesised speech, not a personal one.
+2. **Measure barge-in self-triggering**, now that the thresholds can actually be
+   met. ADR-0028 makes this the gate on relying on barge-in. If the rate is
+   unacceptable, degrade to half-duplex and say so in the GUI — that path is
+   implemented, not assumed unnecessary. Until then the keyboard routes
+   (`Ctrl+Alt+End`, tray **Stop speaking**) are the ones to trust, and the Voice
+   screen says exactly that.
 
-3. **Measure barge-in self-triggering.** ADR-0028 makes this the gate on
-   relying on barge-in. If the rate is unacceptable, degrade to half-duplex and
-   say so in the GUI — that path is implemented, not assumed unnecessary.
+3. **A time tool.** "What time is it?" can currently only be answered by the
+   model, which does not know. It is the most obvious thing to ask a voice
+   assistant and the answer is a small, verifiable tool.
 
-4. **Speak the reply back.** Microphone → transcript → planner now works as one
-   path (`jarvis.ui.voice_controller`), and speaking aloud works, but a
-   conversation reply is not yet automatically spoken when the turn arrived by
-   voice. That last hop is the remainder of "voice-first".
+4. **Arbitrary application launching with first-use permission** — deferred by
+   the owner on 2026-08-04 ("stability first"), not declined. It needs its own
+   ADR before any code: Start-menu discovery as the source of executables
+   (machine state, never model output), an approval on first use, persisted
+   entries, a `.lnk` parser that runs no shortcut, and care around the
+   `powershell.exe` entry every Start menu contains. ADR-0029 constraint 3 is
+   preserved by construction — the model still names an *entry*, never a binary.
+   Progressive web apps come free with it: they are ordinary fixed vectors.
 
 5. **Per-user wake enrolment (ADR-0016 Path 1).** The measurement types,
    threshold fitting and quality bar exist and are tested; the recording flow

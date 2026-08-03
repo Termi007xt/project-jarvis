@@ -50,6 +50,13 @@ audio:
   # legible from the tray without its window open.
   cues_enabled: true
 
+  # always      - say every reply to a spoken request out loud
+  # when_useful - answer questions and report problems aloud; mark a finished
+  #               instruction ("open Brave") with a cue instead of narrating it
+  # never       - never speak a reply; the Conversation screen still has it
+  # A typed request is never answered aloud, whatever this says.
+  speak_replies: when_useful
+
   wake_word:
     provider: openwakeword
     # ADR-0016 Path 1 layers a personal verifier on a pretrained base model, and

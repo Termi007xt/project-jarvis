@@ -173,3 +173,57 @@ def test_a_browser_with_no_url_is_unaffected() -> None:
     entry = default_catalogue().get("brave")
     assert entry is not None
     assert build_argv(entry) == (entry.target,)
+
+
+# -- "open YouTube Music" --------------------------------------------------
+# Reported from real use: "it always opens youtube music as a tab in brave, and
+# never the pwa i installed and pinned to my start menu". The catalogue entry
+# was a URL handed to the browser, which is by definition a tab. An installed
+# progressive web app has its own window and its own taskbar identity, and
+# Chromium launches it by app id — a fixed argument vector, so this stays
+# inside ADR-0029 with no new call site and no new argument kind.
+def test_youtube_music_opens_the_installed_app_not_a_tab() -> None:
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+    argv = build_argv(entry)
+
+    assert any(part.startswith("--app-id=") for part in argv), (
+        "YouTube Music is still being opened as an ordinary browser tab"
+    )
+    assert not any(part.startswith("http") for part in argv), (
+        "a URL argument makes it a tab whatever else is passed"
+    )
+
+
+def test_the_app_id_and_profile_are_fixed_not_model_supplied() -> None:
+    """ADR-0029 constraint 5: arguments come from the entry, never from text."""
+    from jarvis.toolbox.launch import CatalogueError
+
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+    assert entry.argument_kind is ArgumentKind.NONE
+    # Refused outright rather than quietly dropped: an argument that goes
+    # nowhere is indistinguishable from one that was honoured.
+    with pytest.raises(CatalogueError):
+        build_argv(entry, "https://example.com/evil")
+
+
+def test_the_launcher_it_uses_is_not_an_interpreter() -> None:
+    from jarvis.toolbox.launch import validate_entry
+
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+    validate_entry(entry)  # raises if the basename is denylisted
+
+
+def test_it_still_verifies_against_a_real_process() -> None:
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+    assert entry.verify_process_names, "an unverifiable launch can only be 'unverified'"
+
+
+def test_youtube_itself_is_still_a_tab() -> None:
+    """Only the installed app changed; plain YouTube has no PWA here."""
+    entry = default_catalogue().get("youtube")
+    assert entry is not None
+    assert any("youtube.com" in part for part in build_argv(entry))

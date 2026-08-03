@@ -35,6 +35,7 @@ class JarvisTrayIcon(QObject):
     settingsRequested = Signal()
     quitRequested = Signal()
     emergencyStopRequested = Signal()
+    stopSpeakingRequested = Signal()
     pauseRequested = Signal()
     resumeRequested = Signal()
     cancelRequested = Signal()
@@ -92,6 +93,17 @@ class JarvisTrayIcon(QObject):
         self.action_emergency_stop.setToolTip(
             "Cancel every running task, release every resource lock and stop all "
             "automation workers. Jarvis keeps running."
+        )
+
+        # Separate from emergency stop on purpose (ADR-0028): interrupting
+        # speech must not release locks or cancel work, or "stop talking"
+        # becomes quietly destructive.
+        self.action_stop_speaking = self._add(
+            self._menu, "&Stop speaking", self.stopSpeakingRequested.emit
+        )
+        self.action_stop_speaking.setToolTip(
+            "Interrupt Jarvis mid-sentence. Nothing else stops: no task is "
+            "cancelled and no resource lock is released."
         )
         self._menu.addSeparator()
 

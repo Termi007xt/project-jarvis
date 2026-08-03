@@ -31,6 +31,11 @@ pytestmark = pytest.mark.ui
 
 @pytest.fixture
 def application(qapp, core) -> Iterator[JarvisApplication]:
+    # No test opens the speakers. A cue is real audio output, and a stream
+    # still open when the interpreter exits corrupts the heap on the way out —
+    # which this file did, passing every assertion and then dying with
+    # 0xC0000374 after the last one.
+    core.set_setting("audio.cues_enabled", False)
     app = JarvisApplication(core, qapp)
     yield app
     app._refresh_timer.stop()  # noqa: SLF001

@@ -118,10 +118,19 @@ class VoiceService:
             always_listening=wake_settings.always_listening and wake_settings.enrolled,
             enrolled=wake_settings.enrolled,
             phrase=wake_settings.phrase,
-            duplex=self.pipeline.duplex.describe_mode(),
+            duplex=self.describe_interruption(),
             stack_summary=describe_voice_stack(
                 self._config, wake_model_path(self._vault_root)
             ).summary(),
+        )
+
+    def describe_interruption(self) -> str:
+        """What can interrupt Jarvis right now, given the microphone's state."""
+        hotkey = getattr(
+            getattr(self._config, "ui", None), "emergency_stop_hotkey", "the emergency-stop hotkey"
+        )
+        return self.pipeline.duplex.describe_interruption(
+            listening=self.listening, hotkey=hotkey
         )
 
     @property
@@ -286,6 +295,18 @@ class VoiceService:
         show it, so it is attached rather than passed in at construction.
         """
         self._indicator = indicator
+
+    def stop_speaking(self, reason: str = "the user asked Jarvis to stop") -> bool:
+        """Cut playback short. Speech only — never locks, never tasks.
+
+        The deterministic half of ADR-0028. Acoustic barge-in depends on
+        thresholds that have to be measured in a real room; pressing a key does
+        not, so this is the route that has to work before any tuning does.
+        """
+        report = self.pipeline.duplex.request_barge_in(reason)
+        if report.interrupted:
+            self._record(f"speech was stopped: {reason}")
+        return report.interrupted
 
     def finished_speaking(self) -> None:
         self.pipeline.speaking_finished()

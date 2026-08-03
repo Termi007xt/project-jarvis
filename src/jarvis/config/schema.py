@@ -205,6 +205,11 @@ class AudioConfig(_Base):
     #: they are on by default — but they are also the kind of thing that grates,
     #: so they can be turned off.
     cues_enabled: bool = True
+    #: When a *spoken* request gets a spoken answer. A typed request is never
+    #: answered aloud whatever this says — you are already at the screen.
+    #: "when_useful" answers questions and reports problems, and marks a
+    #: finished instruction with a cue instead of narrating it.
+    speak_replies: Literal["always", "when_useful", "never"] = "when_useful"
 
 
 class DefaultPermissionPolicy(_Base):

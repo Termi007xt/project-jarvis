@@ -47,7 +47,16 @@ _LOG = logging.getLogger(__name__)
 
 #: How much higher a detection must score while Jarvis is speaking. Tuning is
 #: hardware-specific; this is a starting point, not a measured constant.
-PLAYBACK_SCORE_MULTIPLIER = 1.6
+#:
+#: It was 1.6, which against the shipped 0.6 threshold demanded a score of 0.96
+#: — a number openWakeWord effectively never produces. Defence 3 was therefore
+#: not a raised bar but a closed door, and acoustic barge-in could not happen at
+#: all. A raised bar has to stay reachable to be a bar.
+PLAYBACK_SCORE_MULTIPLIER = 1.15
+
+#: How far above the measured echo floor a detection must sit to be somebody in
+#: the room rather than Jarvis hearing itself.
+ECHO_MARGIN = 1.5
 
 #: Detections within this long of playback starting or stopping are treated as
 #: overlapping it, covering the delay between emitting a sample and hearing it.
@@ -68,7 +77,13 @@ class PlaybackWindow:
     started_at: datetime
     text: str = ""
     ended_at: datetime | None = None
+    #: Peak RMS of the samples *we* sent to the speakers. Reported, never
+    #: compared against a microphone level — they are different scales.
     peak_level: float = 0.0
+    #: Peak RMS the *microphone* heard during this window: Jarvis's own voice
+    #: coming back into the room. The only honest baseline for "is this the
+    #: user or is this us", because it is measured with the same instrument.
+    captured_floor: float = 0.0
 
     def covers(self, moment: datetime) -> bool:
         if moment < self.started_at - timedelta(seconds=ECHO_TAIL_SECONDS):
@@ -131,6 +146,30 @@ class DuplexCoordinator:
             "hotkey instead."
         )
 
+    def describe_interruption(self, *, listening: bool, hotkey: str) -> str:
+        """What can actually interrupt Jarvis right now (ADR-0010, NFR-014).
+
+        Full duplex is a property of the coordinator; being interruptible *by
+        voice* also needs an open microphone. With listening off there is
+        nothing to hear the interruption, and saying "you can interrupt Jarvis"
+        in that state is simply untrue.
+        """
+        keyboard = (
+            f"{hotkey} stops speech immediately, as does Stop speaking in the "
+            "tray menu."
+        )
+        if self.mode is DuplexMode.HALF:
+            return f"{self.describe_mode()} {keyboard}"
+        if not listening:
+            return (
+                "Speaking over Jarvis will not interrupt it: the microphone is "
+                f"closed unless listening is on. {keyboard}"
+            )
+        return (
+            "Full duplex: say the wake phrase to interrupt Jarvis while it is "
+            f"speaking. The self-trigger rate for this room is not measured yet. {keyboard}"
+        )
+
     # -- playback ----------------------------------------------------------
     @property
     def speaking(self) -> bool:
@@ -155,10 +194,28 @@ class DuplexCoordinator:
             self._stop_playback.clear()
 
     def note_emitted_level(self, chunk: AudioChunk) -> None:
-        """Record how loud Jarvis's own output was, for the echo comparison."""
+        """Record how loud Jarvis's own output was. Reported, not compared."""
         with self._lock:
             if self._current is not None:
                 self._current.peak_level = max(self._current.peak_level, rms_level(chunk))
+
+    def note_captured_level(self, level: float) -> None:
+        """Record how loud the *room* is while Jarvis speaks (the echo floor).
+
+        Called for every captured frame during playback. What the microphone
+        hears while Jarvis talks and nobody else does is exactly the level a
+        genuine interruption has to rise above, and it is the only baseline on
+        the same scale as the detection being judged.
+        """
+        with self._lock:
+            if self._current is not None:
+                self._current.captured_floor = max(self._current.captured_floor, level)
+
+    @property
+    def echo_floor(self) -> float:
+        """The loudest the microphone has been during this utterance."""
+        with self._lock:
+            return self._current.captured_floor if self._current is not None else 0.0
 
     # -- capture gating (ADR-0028 rule: playback never stops capture) ------
     def capture_should_run(self) -> bool:
@@ -200,15 +257,24 @@ class DuplexCoordinator:
                 )
                 return False
 
-            # ...and reject one whose level merely tracks what we just emitted.
+            # ...and reject one that is no louder than the room already was
+            # with only Jarvis speaking in it. Both sides of this comparison
+            # are microphone levels; comparing one against the RMS of our own
+            # synthesised samples, as this once did, rejected almost every
+            # genuine interruption because a desk microphone hearing a person
+            # is quieter than a waveform on its way to the speakers.
             if (
                 captured_level is not None
                 and window is not None
-                and window.peak_level > 0.0
-                and captured_level <= window.peak_level * 1.1
+                and window.captured_floor > 0.0
+                and captured_level <= window.captured_floor * ECHO_MARGIN
             ):
                 self._self_triggers += 1
-                _LOG.debug("rejected a detection during playback: level matches our own output")
+                _LOG.debug(
+                    "rejected a detection during playback: %.4f is within the %.2fx "
+                    "margin of the %.4f echo floor",
+                    captured_level, ECHO_MARGIN, window.captured_floor,
+                )
                 return False
 
             self._accepted_during_playback += 1

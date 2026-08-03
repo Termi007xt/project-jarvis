@@ -67,6 +67,18 @@ touching your files.
   use the wake phrase instead.
 - **The Voice screen shows what it heard**, with a confidence figure, so a
   misheard word looks like a mishearing rather than a bad answer.
+- **Your name.** Set it on the Conversation screen and it replaces "You" in the
+  transcript, survives restarts, and is given to the model so Jarvis can address
+  you properly. Leave it empty and nothing changes.
+- **Audio cues.** Short tones for "I heard the wake phrase and I am recording",
+  "I am working on it", and "that is done" — so Jarvis is legible from the tray
+  without its window on screen. Turn them off with `audio.cues_enabled`.
+- **`web.search`.** Searching by words rather than by URL, with DuckDuckGo,
+  Google or YouTube. Jarvis builds the address, so a query with spaces, symbols
+  or a colon in it works. It says outright that it cannot read the results.
+- **Stop speaking**, in the tray menu. It interrupts the sentence and does
+  nothing else: no task is cancelled and no resource lock is released.
+- **`audio.speak_replies`** — `always`, `when_useful` (the default) or `never`.
 
 ### Changed
 
@@ -81,6 +93,24 @@ touching your files.
 - In **offline mode** the speech models are pinned to their local cache. Loading
   a voice or transcription model previously contacted the Hugging Face Hub,
   which was a network request from a component presented as entirely local.
+- **Speaking to Jarvis no longer drags the window in front of what you were
+  doing.** Speaking is meant to be the way to use Jarvis *without* the window;
+  taking over the screen because someone spoke is the intrusion the non-modal
+  approval panel exists to avoid.
+- **A spoken question is now answered out loud**, and only when the answer is
+  worth hearing. Questions are answered, problems and follow-up questions are
+  always spoken, and an instruction that simply worked — "open Brave" — gets a
+  short cue instead of a sentence about a window you can already see. A *typed*
+  request is never answered aloud, whatever the setting says.
+- **Emoji, formatting and web addresses are no longer read out.** The
+  phonemiser expands every character to its Unicode name, so "Opening Brave 🦁"
+  was spoken as "Opening Brave lion face", and a link was spelled out in full.
+  The written transcript still shows every character; only the spoken copy is
+  stripped, and a code block is announced rather than recited.
+- **"Open YouTube Music" opens the app you installed**, not another browser tab.
+- **Emergency stop now stops Jarvis talking**, from the tray, the Home screen
+  and the hotkey. It cancelled tasks and released locks while continuing to
+  speak over the silence it had just created.
 
 ### Fixed
 
@@ -108,6 +138,26 @@ touching your files.
   only one kind of device accepts.
 - **Asking Jarvis to say something failed outright** with an internal error: it
   reserved a lock by a name that does not exist.
+- **Some questions came back completely blank**, under a confident source
+  label, which is indistinguishable from being ignored. When the model returns
+  nothing, Jarvis now says so — and says what its tools did, if they did
+  anything — rather than rendering the silence as an answer.
+- **Interrupting Jarvis mid-sentence never actually worked.** Three separate
+  causes: the wake threshold during playback demanded a score of 0.96, which is
+  effectively unreachable; the self-echo check compared the microphone's level
+  against the volume of Jarvis's own audio data, which are not the same kind of
+  measurement, and rejected real interruptions almost every time; and emergency
+  stop did not stop speech at all. The Voice screen now also says plainly that
+  speaking over Jarvis cannot interrupt it while the microphone is closed.
+- **Searching the web produced a broken address.** The model was building and
+  encoding search URLs itself; one came back from Google as an error. Jarvis
+  builds them now.
+- **"Open Steam" refused to open Steam**, because the entry insisted on a game
+  to launch. With no game named, it opens the client.
+- **Being asked to open an unapproved application produced invented
+  instructions** pointing at a settings screen that does not exist.
+- **A cue could leave an audio stream open** after the sound had finished, which
+  in the worst case corrupted memory as the process exited.
 
 ### Known limitations
 
@@ -115,11 +165,16 @@ touching your files.
   pretrained "Hey Jarvis" model is measured and working; per-user enrolment is
   not built, and ADR-0016 does not permit always-listening without it.
   Single-word "Jarvis" is not detected — measured 0 of 4 attempts.
-- **Barge-in is unproven on real hardware.** Interrupting Jarvis mid-sentence is
-  implemented, but the rate at which it mistakes its own voice for yours has not
-  been measured, so it should not yet be relied upon.
-- **A spoken question is answered in writing, not aloud**, unless you ask Jarvis
-  to speak.
+- **Barge-in is unproven on real hardware.** Interrupting Jarvis by voice now
+  has thresholds that can actually be met, but the rate at which it mistakes its
+  own voice for yours has still not been measured, so it should not yet be
+  relied upon. It also needs the microphone open, which means listening turned
+  on. `Ctrl+Alt+End` and the tray's **Stop speaking** work in every state and
+  are the routes to trust until that measurement exists.
+- **Jarvis has no clock.** It can only answer "what time is it?" from the model,
+  which does not know. There is no time tool yet.
+- **Only catalogued applications can be opened.** Naming one that is not in the
+  catalogue is refused, and there is no in-application way to add one.
 
 ---
 

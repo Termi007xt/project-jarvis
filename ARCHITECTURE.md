@@ -710,6 +710,9 @@ the single call site ADR-0029 authorises.
 | Personality profile and proposals | Implemented (Phase 1) | user-editable; a proposal changes nothing until accepted (§4.4) |
 | Voice: capture, ring buffer, VAD, STT, TTS, barge-in | Implemented (Phase 1) | optional `voice` extra, lazily imported; verified on this hardware |
 | Audio playback (`jarvis.audio.playback`) | Implemented (Phase 1) | interruptible between 40 ms blocks, bounded at 300 s, reports seconds actually written. Previously absent, which made every "Spoken." claim false |
+| Audio cues (`jarvis.audio.cues`) | Implemented (Phase 1) | four generated sine tones — wake, thinking, done, failed — so a tray application is legible without its window. Nothing is shipped as a file, so nothing can go missing or need a licence |
+| Spoken-reply policy (`jarvis.audio.reply_policy`) | Implemented (Phase 1) | decides speak / cue / silent from the request, the reply and the tool results. In code, not asked of the model: a model deciding whether to speak drifts, and the drift is invisible |
+| Speech text preparation (`jarvis.audio.tts.speakable_text`) | Implemented (Phase 1) | strips emoji, markdown and URL machinery before synthesis, and runs **before** redaction so formatting cannot hide a credential from the FR-034 patterns. Presentation only — it removes no words, and the transcript is untouched |
 | Voice ↔ shell wiring (`jarvis.ui.voice_controller`) | Implemented (Phase 1) | push-to-talk, level meter, recording indicator, device choice, mic test, calibration, preview |
 | Wake-word base model | Implemented (Phase 1) | openWakeWord `hey_jarvis` ONNX, installed via `--install-wake-model`, never bundled; non-commercial licence |
 | Per-user wake enrolment | Not implemented | ADR-0016 Path 1; always-listening stays off without it, and the button is disabled and says so |

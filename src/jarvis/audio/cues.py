@@ -49,12 +49,19 @@ class Cue:
     #: Nothing usable was heard, or the attempt was abandoned. Falling.
     FAILED = "failed"
 
+    #: The thing you asked for is done, and there is nothing worth saying about
+    #: it. Two short taps: unmistakably an ending, over before it is noticed.
+    #: This is what replaces "I've opened Brave for you!" — a sentence nobody
+    #: needs to hear about an application that is now visibly open.
+    DONE = "done"
+
 
 #: (frequency Hz, seconds) pairs, played in order.
 _TONES: dict[str, Sequence[tuple[float, float]]] = {
     Cue.WAKE: ((880.0, 0.07), (1318.5, 0.09)),
     Cue.THINKING: ((587.3, 0.10),),
     Cue.FAILED: ((587.3, 0.09), (392.0, 0.12)),
+    Cue.DONE: ((1046.5, 0.06), (1396.9, 0.08)),
 }
 
 

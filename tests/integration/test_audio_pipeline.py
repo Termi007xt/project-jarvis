@@ -84,13 +84,20 @@ def test_the_pipeline_keeps_taking_frames_while_speaking() -> None:
 
 # -- ADR-0028: a self-echo does not trigger a wake -------------------------
 def test_a_detection_attributed_to_our_own_output_is_rejected() -> None:
-    """The synthetic self-echo case ADR-0028 requires."""
+    """The synthetic self-echo case ADR-0028 requires.
+
+    The baseline changed deliberately: it used to be the RMS of the samples
+    Jarvis *emitted*, which is not on the same scale as a microphone level and
+    rejected genuine interruptions almost every time. It is now what the
+    microphone itself heard during playback (see tests/unit/test_interruption).
+    """
     coordinator = DuplexCoordinator()
     window = coordinator.playback_started("Jarvis speaking")
     coordinator.note_emitted_level(frame(0.4))
+    coordinator.note_captured_level(0.4)
 
     echo = WakeEvent(phrase="Hey Jarvis", score=0.6, detected_at=utc_now())
-    # A score that would pass normally, at a level matching what we emitted.
+    # A score that would pass normally, no louder than the room already was.
     assert not coordinator.accept_detection(echo, 0.5, captured_level=0.38)
     assert coordinator.self_trigger_count == 1
     assert window.peak_level > 0
@@ -116,7 +123,7 @@ def test_a_detection_just_after_playback_still_counts_as_overlapping() -> None:
     """Sound takes time to travel; the echo tail is not zero."""
     coordinator = DuplexCoordinator()
     coordinator.playback_started("x")
-    coordinator.note_emitted_level(frame(0.4))
+    coordinator.note_captured_level(0.4)
     coordinator.playback_finished()
 
     echo = WakeEvent(phrase="Hey Jarvis", score=0.6, detected_at=utc_now())
@@ -172,7 +179,7 @@ def test_the_measurement_that_gates_enabling_barge_in_is_reported() -> None:
     assert "No detections" in coordinator.measurement_summary()
 
     coordinator.playback_started("x")
-    coordinator.note_emitted_level(frame(0.4))
+    coordinator.note_captured_level(0.4)
     coordinator.accept_detection(
         WakeEvent(phrase="p", score=0.6, detected_at=utc_now()), 0.5, captured_level=0.38
     )

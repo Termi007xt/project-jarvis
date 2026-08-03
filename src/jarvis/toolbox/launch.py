@@ -75,6 +75,14 @@ AUMID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+(?:_[A-Za-z0-9]+)?![A-Za-z0-9._-]+$
 #: The fixed broker for Store applications. A constant, never a catalogue value.
 _EXPLORER = "explorer.exe"
 
+#: The installed YouTube Music web app. Chromium derives an app id from the
+#: application's start URL, so this is stable for music.youtube.com rather than
+#: personal to one machine — but it is still only a seed. If the app is not
+#: installed the launch fails and says so, which is the honest outcome; it does
+#: not silently fall back to a tab, because a silent fallback is how "open
+#: YouTube Music" quietly stopped meaning what the user asked for.
+_YOUTUBE_MUSIC_APP_ID = "cinhimbnkkaeohfgghhklpknlkffjgod"
+
 
 class CatalogueError(ValueError):
     """A catalogue entry was refused. Raised at registration, not at launch."""
@@ -442,10 +450,19 @@ def default_catalogue(config: object | None = None) -> ApplicationCatalogue:
                 app_id="youtube_music",
                 display_name="YouTube Music",
                 kind=LaunchKind.EXECUTABLE,
-                target=brave.target,
-                fixed_arguments=("https://music.youtube.com",),
+                # The installed progressive web app, not a tab. Handing the URL
+                # to the browser opens a tab by definition, which is not what
+                # "open YouTube Music" means to somebody who installed the app
+                # and pinned it to the Start menu. Chromium launches an
+                # installed app by id, and this is the same fixed vector the
+                # Start-menu shortcut uses, so no new call site is involved.
+                target=rf"{program_files}\BraveSoftware\Brave-Browser\Application\chrome_proxy.exe",
+                fixed_arguments=(
+                    "--profile-directory=Default",
+                    f"--app-id={_YOUTUBE_MUSIC_APP_ID}",
+                ),
                 verify_process_names=("brave.exe",),
-                aliases=("youtube music", "music"),
+                aliases=("youtube music", "music", "yt music", "ytmusic"),
             ),
             ApplicationEntry(
                 app_id="xbox",

@@ -105,3 +105,62 @@ AEC proves unavailable through the chosen capture library.
 ADR-0016 (wake-word enrolment — the detector barge-in depends on),
 ADR-0027 (push-to-talk F9 as the deterministic interruption path),
 ADR-0015 (TTS providers — playback source), PRD FR-010, FR-012, FR-013, FR-015, §11.3.
+
+---
+
+## Amendment — 2026-08-04: the defences were tuned past the point of working
+
+**Status:** Accepted. Recorded after the owner reported, from real use, "i am
+not able to interrupt it for some reason."
+
+The mechanism was never the problem. `jarvis.audio.playback.play` polls
+`DuplexCoordinator.stop_requested` between 40 ms blocks, so an interruption
+takes effect within one block of being requested. Nothing was requesting one.
+
+**Defence 3 was a closed door, not a raised bar.** `PLAYBACK_SCORE_MULTIPLIER`
+was 1.6. Against the shipped wake threshold of 0.6 that demanded a detection
+score of 0.96 — a number openWakeWord effectively never produces. A raised
+threshold has to stay reachable to be a threshold; at 1.6 acoustic barge-in
+could not happen at all, and the code read as though it could. It is now 1.15.
+
+**The echo comparison used two different instruments.** The self-echo test
+measured our own *digital output samples* with `note_emitted_level` and rejected
+any detection whose *microphone* level did not exceed it. Those are not the same
+scale: a desk microphone hearing a person across a room is almost always quieter
+than the RMS of a waveform on its way to the speakers, so the test rejected
+genuine interruptions essentially every time while looking like a reasonable
+heuristic.
+
+The comparison is only meaningful between like and like. What the microphone
+hears while Jarvis speaks and nobody else does *is* the echo floor, it is
+measured with the same instrument on the same scale, and it is already
+available — the pipeline sees every captured frame. `note_captured_level` now
+records it per playback window, and a detection must exceed that floor by
+`ECHO_MARGIN` (1.5) to be treated as somebody in the room. `note_emitted_level`
+is kept for the measurement report and is no longer part of any decision.
+
+### What this does not change
+
+The gate stands: **the self-trigger rate is still unmeasured on real hardware**,
+and nothing here claims otherwise. `describe_interruption` now states this on the
+Voice screen rather than asserting that Jarvis is interruptible.
+
+### What this adds
+
+A keyboard route that does not depend on tuning at all. Acoustic barge-in needs
+thresholds measured in a real room with real speakers; pressing a key does not,
+and until the measurement exists the deterministic route is the one to trust:
+
+- `Ctrl+Alt+End` (emergency stop) now interrupts speech **before** it stops the
+  automation. It previously cancelled tasks and released locks while continuing
+  to talk over the silence it had just created.
+- **Stop speaking** in the tray menu interrupts speech and does nothing else.
+
+The second is deliberately separate from emergency stop, for the reason this ADR
+already gives: barge-in releases no locks and cancels no tasks, and conflating
+"be quiet" with "stop everything" would make the quieter request destructive.
+Acoustic barge-in additionally requires an open microphone, which means
+listening turned on — a precondition that was not stated anywhere and is now
+part of what the Voice screen reports.
+
+Tests: `tests/unit/test_interruption.py`, `tests/ui/test_stop_speaking.py`.

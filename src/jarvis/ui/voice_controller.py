@@ -137,7 +137,16 @@ class VoiceController(QObject):
                 _LOG.debug("could not play the '%s' cue", name, exc_info=True)
 
         thread = threading.Thread(target=emit, name=f"jarvis-cue-{name}", daemon=True)
+        # Tracked, not fire-and-forget: an output stream still open when the
+        # interpreter tears down corrupts the heap on the way out, and a cue
+        # fires on every wake, so this is the most frequent thread in the app.
+        self._track(thread)
         thread.start()
+
+    def _track(self, thread: threading.Thread) -> None:
+        """Remember a worker so shutdown can wait for it, without hoarding."""
+        self._threads = [existing for existing in self._threads if existing.is_alive()]
+        self._threads.append(thread)
 
     # -- speaking a reply --------------------------------------------------
     def speak_reply(self, text: str) -> None:
@@ -156,6 +165,14 @@ class VoiceController(QObject):
             )
             _LOG.info("could not speak the reply: %s", detail)
             self.noticed.emit("Could not say that aloud", detail)
+
+    def stop_speaking(self, reason: str = "the user asked Jarvis to stop") -> bool:
+        """Silence Jarvis now. Returns whether there was anything to silence."""
+        try:
+            return bool(self._voice.stop_speaking(reason))  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - a panic button must not raise
+            _LOG.exception("could not stop speech")
+            return False
 
     def _on_heard(self, text: str, confidence: object) -> None:
         self._panel.set_last_heard(  # type: ignore[attr-defined]
@@ -367,7 +384,7 @@ class VoiceController(QObject):
                 self.noticed.emit("That did not work", f"The {name} action failed.")
 
         thread = threading.Thread(target=guarded, name=f"jarvis-voice-{name}", daemon=True)
-        self._threads.append(thread)
+        self._track(thread)
         thread.start()
 
     def shutdown(self, timeout_seconds: float = 3.0) -> None:

@@ -30,9 +30,9 @@
     "semantic_hash": "068f6890af7abf44e154558240581a34"
   },
   "src/jarvis/config/schema.py": {
-    "mtime": 1785678443.753978,
-    "ast_hash": "5fa19671c60a47d8e7785295975c9e46",
-    "semantic_hash": "5fa19671c60a47d8e7785295975c9e46"
+    "mtime": 1785786834.3050807,
+    "ast_hash": "7fe2e6f2400dfc358576313f7ad6f84e",
+    "semantic_hash": "7fe2e6f2400dfc358576313f7ad6f84e"
   },
   "src/jarvis/config/store.py": {
     "mtime": 1785587174.0487418,
@@ -165,9 +165,9 @@
     "semantic_hash": "d5ff0608b11ce322332ae415bc039700"
   },
   "src/jarvis/runtime/core.py": {
-    "mtime": 1785762934.1660726,
-    "ast_hash": "207dc19c4828f3611d347aac828b8d5a",
-    "semantic_hash": "207dc19c4828f3611d347aac828b8d5a"
+    "mtime": 1785782670.1480882,
+    "ast_hash": "9b117662deb21427485f6e0a8e03fab5",
+    "semantic_hash": "9b117662deb21427485f6e0a8e03fab5"
   },
   "src/jarvis/runtime/single_instance.py": {
     "mtime": 1785609926.572534,
@@ -250,9 +250,9 @@
     "semantic_hash": "885fa351d8d6ff54176f38d8f274ba07"
   },
   "src/jarvis/ui/app.py": {
-    "mtime": 1785762482.48125,
-    "ast_hash": "87b1eda53f63c00b53d286236a0ccc51",
-    "semantic_hash": "87b1eda53f63c00b53d286236a0ccc51"
+    "mtime": 1785786828.0030563,
+    "ast_hash": "f98d2d17426e364e0442b0323421ec33",
+    "semantic_hash": "f98d2d17426e364e0442b0323421ec33"
   },
   "src/jarvis/ui/icons.py": {
     "mtime": 1785611071.417416,
@@ -260,9 +260,9 @@
     "semantic_hash": "caa4f6e4619ecc355b3a5cf6fe9dc075"
   },
   "src/jarvis/ui/main_window.py": {
-    "mtime": 1785692952.506345,
-    "ast_hash": "a05d71ea108c69507cb43a8f1d30b9dc",
-    "semantic_hash": "a05d71ea108c69507cb43a8f1d30b9dc"
+    "mtime": 1785782624.542075,
+    "ast_hash": "abe9268ae33576ef8f3a093ef251fa5a",
+    "semantic_hash": "abe9268ae33576ef8f3a093ef251fa5a"
   },
   "src/jarvis/ui/qt_bridge.py": {
     "mtime": 1785609068.277467,
@@ -270,14 +270,14 @@
     "semantic_hash": "0e71a9e3d437b979ca3ca3229d5a01a2"
   },
   "src/jarvis/ui/tray.py": {
-    "mtime": 1785677509.9966862,
-    "ast_hash": "ea09e7ebd9985676750a0e8488eabc4c",
-    "semantic_hash": "ea09e7ebd9985676750a0e8488eabc4c"
+    "mtime": 1785786414.7246525,
+    "ast_hash": "8037b36900f54d80200fae26f126e9c1",
+    "semantic_hash": "8037b36900f54d80200fae26f126e9c1"
   },
   "tests/acceptance/test_phase0_exit_criteria.py": {
-    "mtime": 1785693109.3987348,
-    "ast_hash": "85fb6e8ffd5db9423eb325da7dbb7861",
-    "semantic_hash": "85fb6e8ffd5db9423eb325da7dbb7861"
+    "mtime": 1785783586.1333148,
+    "ast_hash": "86266f1b50da7cd856d940bf684d2a10",
+    "semantic_hash": "86266f1b50da7cd856d940bf684d2a10"
   },
   "tests/conftest.py": {
     "mtime": 1785609296.852504,
@@ -585,24 +585,24 @@
     "semantic_hash": "c0ffae8af9d882485956c92a45b6a6ad"
   },
   "src/jarvis/audio/capture.py": {
-    "mtime": 1785689951.816572,
-    "ast_hash": "7a7064d39863c76e8c38fd17cf899dae",
-    "semantic_hash": "7a7064d39863c76e8c38fd17cf899dae"
+    "mtime": 1785765092.858194,
+    "ast_hash": "37588ba25fbba2d0d7058935e036a75a",
+    "semantic_hash": "37588ba25fbba2d0d7058935e036a75a"
   },
   "src/jarvis/audio/duplex.py": {
-    "mtime": 1785689913.0850427,
-    "ast_hash": "17cb2938eb2422ff8e29ec3aa7dd4d5c",
-    "semantic_hash": "17cb2938eb2422ff8e29ec3aa7dd4d5c"
+    "mtime": 1785786467.0249405,
+    "ast_hash": "e0d5d15897525d1799683608f868fa22",
+    "semantic_hash": "e0d5d15897525d1799683608f868fa22"
   },
   "src/jarvis/audio/pipeline.py": {
-    "mtime": 1785762361.6509874,
-    "ast_hash": "9b16dee8978b2f383f367d833cad5562",
-    "semantic_hash": "9b16dee8978b2f383f367d833cad5562"
+    "mtime": 1785786292.1594045,
+    "ast_hash": "6cad9800812764a3ae6cd536c6ad4b65",
+    "semantic_hash": "6cad9800812764a3ae6cd536c6ad4b65"
   },
   "src/jarvis/audio/ports.py": {
-    "mtime": 1785689821.3756618,
-    "ast_hash": "be0cd79e72e4bec5a27a8d075d6b7280",
-    "semantic_hash": "be0cd79e72e4bec5a27a8d075d6b7280"
+    "mtime": 1785765065.8353176,
+    "ast_hash": "f00cfe509b8762d0499ecabb3ad4e05d",
+    "semantic_hash": "f00cfe509b8762d0499ecabb3ad4e05d"
   },
   "src/jarvis/audio/ring_buffer.py": {
     "mtime": 1785690350.8511012,
@@ -610,9 +610,9 @@
     "semantic_hash": "f803bc8f7eba1ffcdd49d6ee967fb109"
   },
   "src/jarvis/audio/service.py": {
-    "mtime": 1785762924.8404593,
-    "ast_hash": "34a75171594057158ed391d0c59c1af1",
-    "semantic_hash": "34a75171594057158ed391d0c59c1af1"
+    "mtime": 1785786476.8394225,
+    "ast_hash": "d75079bd8b51930c07728b7db6ced450",
+    "semantic_hash": "d75079bd8b51930c07728b7db6ced450"
   },
   "src/jarvis/audio/stt.py": {
     "mtime": 1785690066.9294317,
@@ -620,9 +620,9 @@
     "semantic_hash": "e044a68e2fc9e666a26e950a5b6b5dba"
   },
   "src/jarvis/audio/tts.py": {
-    "mtime": 1785690007.6790047,
-    "ast_hash": "951d32dcf848b87603ab79002fc009b7",
-    "semantic_hash": "951d32dcf848b87603ab79002fc009b7"
+    "mtime": 1785786095.4911447,
+    "ast_hash": "c3d77dd4d020b7a79e283c109618630c",
+    "semantic_hash": "c3d77dd4d020b7a79e283c109618630c"
   },
   "src/jarvis/audio/vad.py": {
     "mtime": 1785689872.539046,
@@ -640,9 +640,9 @@
     "semantic_hash": "f386c17d0be47475a52735f67f955be4"
   },
   "src/jarvis/llm/conversation.py": {
-    "mtime": 1785679210.2423322,
-    "ast_hash": "1fe0feabe90de40afcacf718f2d05111",
-    "semantic_hash": "1fe0feabe90de40afcacf718f2d05111"
+    "mtime": 1785782665.2847457,
+    "ast_hash": "03b8b5b75ebb6da1e1d9d7a8cd8e9134",
+    "semantic_hash": "03b8b5b75ebb6da1e1d9d7a8cd8e9134"
   },
   "src/jarvis/llm/grounding.py": {
     "mtime": 1785689679.523964,
@@ -690,14 +690,14 @@
     "semantic_hash": "ee972ef0c23a3f0f135f5e4c0bd5667c"
   },
   "src/jarvis/ui/conversation.py": {
-    "mtime": 1785761487.313511,
-    "ast_hash": "cd65b499d3a00c02f5a908393ded242c",
-    "semantic_hash": "cd65b499d3a00c02f5a908393ded242c"
+    "mtime": 1785782612.5758014,
+    "ast_hash": "3c8f8ef45b9b171e436a0b73aefd2b7a",
+    "semantic_hash": "3c8f8ef45b9b171e436a0b73aefd2b7a"
   },
   "src/jarvis/ui/voice.py": {
-    "mtime": 1785762681.790881,
-    "ast_hash": "9c847b9d29b767a7d2d0e2715cf5cedd",
-    "semantic_hash": "9c847b9d29b767a7d2d0e2715cf5cedd"
+    "mtime": 1785780398.3451357,
+    "ast_hash": "d89cdcc5f92c35369ff68f7ae30793d4",
+    "semantic_hash": "d89cdcc5f92c35369ff68f7ae30793d4"
   },
   "tests/acceptance/test_at002_wake_privacy.py": {
     "mtime": 1785690392.5004852,
@@ -710,9 +710,9 @@
     "semantic_hash": "62c8905a6c805260749dbcab0851cf10"
   },
   "tests/integration/test_audio_pipeline.py": {
-    "mtime": 1785690523.9948616,
-    "ast_hash": "efe24b5531b7d4e45f12153f319d88a3",
-    "semantic_hash": "efe24b5531b7d4e45f12153f319d88a3"
+    "mtime": 1785786353.1194012,
+    "ast_hash": "f1ad2af057ee9ed406784ca3a8c59ee7",
+    "semantic_hash": "f1ad2af057ee9ed406784ca3a8c59ee7"
   },
   "tests/integration/test_ollama_tool_calling.py": {
     "mtime": 1785689055.3846254,
@@ -770,9 +770,9 @@
     "semantic_hash": "4d8fd2f704188617a114959fd6ffaa31"
   },
   "src/jarvis/toolbox/launch.py": {
-    "mtime": 1785693208.9130666,
-    "ast_hash": "abf857010813998fdd985bd1913a4079",
-    "semantic_hash": "abf857010813998fdd985bd1913a4079"
+    "mtime": 1785786935.9531984,
+    "ast_hash": "e181c543a0892bb8fb34f8924db6ff9e",
+    "semantic_hash": "e181c543a0892bb8fb34f8924db6ff9e"
   },
   "src/jarvis/toolbox/media.py": {
     "mtime": 1785692083.926427,
@@ -780,19 +780,19 @@
     "semantic_hash": "c48854a4a11b979837ab0a0017dabfe5"
   },
   "src/jarvis/toolbox/phase1_tools.py": {
-    "mtime": 1785762064.4279199,
-    "ast_hash": "c98564c1cc7983d2b72c495318df7122",
-    "semantic_hash": "c98564c1cc7983d2b72c495318df7122"
+    "mtime": 1785783164.5256793,
+    "ast_hash": "7f84f9f416dd85f498436a99e1df8410",
+    "semantic_hash": "7f84f9f416dd85f498436a99e1df8410"
   },
   "src/jarvis/ui/voice_controller.py": {
-    "mtime": 1785762537.3245277,
-    "ast_hash": "ae1a693a280d6ca239174292c41ab434",
-    "semantic_hash": "ae1a693a280d6ca239174292c41ab434"
+    "mtime": 1785786609.9100454,
+    "ast_hash": "68721efb260cd2bfe8d375cc4383907b",
+    "semantic_hash": "68721efb260cd2bfe8d375cc4383907b"
   },
   "tests/acceptance/test_at003_app_launch.py": {
-    "mtime": 1785692309.0079668,
-    "ast_hash": "e050168f115a2eca726f7de313b5ce93",
-    "semantic_hash": "e050168f115a2eca726f7de313b5ce93"
+    "mtime": 1785787017.0361521,
+    "ast_hash": "045d2e150429ba6120eed53e767ae596",
+    "semantic_hash": "045d2e150429ba6120eed53e767ae596"
   },
   "tests/security/test_application_launch.py": {
     "mtime": 1785693218.4659762,
@@ -810,9 +810,9 @@
     "semantic_hash": "5eeefa9e684a5a26b643a8e0b53db955"
   },
   "tests/ui/test_voice_wiring.py": {
-    "mtime": 1785762660.2986965,
-    "ast_hash": "a1ec043ffebe40e9305a685265141e27",
-    "semantic_hash": "a1ec043ffebe40e9305a685265141e27"
+    "mtime": 1785786615.8576999,
+    "ast_hash": "fa1207975a504f40d1bec0fe863b1a43",
+    "semantic_hash": "fa1207975a504f40d1bec0fe863b1a43"
   },
   "tests/unit/test_playback.py": {
     "mtime": 1785762093.1557963,
@@ -828,5 +828,70 @@
     "mtime": 1785692916.6726885,
     "ast_hash": "f1998f35cbcc3726e69f9278ef3c3fb6",
     "semantic_hash": "f1998f35cbcc3726e69f9278ef3c3fb6"
+  },
+  "src/jarvis/audio/cues.py": {
+    "mtime": 1785786728.1990616,
+    "ast_hash": "f6586c1189e04cc758befad43ddd985a",
+    "semantic_hash": "f6586c1189e04cc758befad43ddd985a"
+  },
+  "src/jarvis/audio/reply_policy.py": {
+    "mtime": 1785786786.9480171,
+    "ast_hash": "650ef25345f08e45ba7b76f7425f4966",
+    "semantic_hash": "650ef25345f08e45ba7b76f7425f4966"
+  },
+  "tests/security/test_tool_specs_are_valid.py": {
+    "mtime": 1785780081.6998985,
+    "ast_hash": "0e9ce2a50dd7af80ca30aec68097d72a",
+    "semantic_hash": "0e9ce2a50dd7af80ca30aec68097d72a"
+  },
+  "tests/ui/test_cross_thread_marshalling.py": {
+    "mtime": 1785780265.9617932,
+    "ast_hash": "5344c2a890d759da4f55ca802ac2d6e0",
+    "semantic_hash": "5344c2a890d759da4f55ca802ac2d6e0"
+  },
+  "tests/ui/test_listening_controls.py": {
+    "mtime": 1785780790.2857914,
+    "ast_hash": "a26137e3597ba35015b8302ad58fe34b",
+    "semantic_hash": "a26137e3597ba35015b8302ad58fe34b"
+  },
+  "tests/ui/test_stop_speaking.py": {
+    "mtime": 1785786387.0883083,
+    "ast_hash": "b3df7d21ad0a251abb61a1e9e5fbb8b3",
+    "semantic_hash": "b3df7d21ad0a251abb61a1e9e5fbb8b3"
+  },
+  "tests/ui/test_voice_reply_behaviour.py": {
+    "mtime": 1785783447.2176073,
+    "ast_hash": "5dfcf6aef9d76278bb6efdce20f8c2b0",
+    "semantic_hash": "5dfcf6aef9d76278bb6efdce20f8c2b0"
+  },
+  "tests/unit/test_capture_host_api.py": {
+    "mtime": 1785765177.6743195,
+    "ast_hash": "0805866bb9dc9e14259dfcb7515280d4",
+    "semantic_hash": "0805866bb9dc9e14259dfcb7515280d4"
+  },
+  "tests/unit/test_empty_model_reply.py": {
+    "mtime": 1785783500.4345255,
+    "ast_hash": "ab1c75189a27ededc4a6c30e8e1a130b",
+    "semantic_hash": "ab1c75189a27ededc4a6c30e8e1a130b"
+  },
+  "tests/unit/test_interruption.py": {
+    "mtime": 1785786485.0189905,
+    "ast_hash": "97e083039ad7c9823ef5d15b8ae85493",
+    "semantic_hash": "97e083039ad7c9823ef5d15b8ae85493"
+  },
+  "tests/unit/test_reply_speech_policy.py": {
+    "mtime": 1785786751.8237066,
+    "ast_hash": "bd5331a396f2c4bd75b6722f87434e30",
+    "semantic_hash": "bd5331a396f2c4bd75b6722f87434e30"
+  },
+  "tests/unit/test_speakable_text.py": {
+    "mtime": 1785785989.987064,
+    "ast_hash": "6157916f32432d6bf8f8ed06289c13b6",
+    "semantic_hash": "6157916f32432d6bf8f8ed06289c13b6"
+  },
+  "tests/unit/test_web_search_and_catalogue.py": {
+    "mtime": 1785787008.726462,
+    "ast_hash": "5aef396cfc1c93e4f6aa49d818acd2b6",
+    "semantic_hash": "5aef396cfc1c93e4f6aa49d818acd2b6"
   }
 }

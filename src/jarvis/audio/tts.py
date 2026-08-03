@@ -37,6 +37,8 @@ __all__ = [
     "NullTtsProvider",
     "build_tts_provider",
     "redact_for_speech",
+    "speakable_text",
+    "prepare_for_speech",
     "SENSITIVE_PATTERNS",
 ]
 
@@ -65,6 +67,86 @@ def redact_for_speech(text: str) -> tuple[str, bool]:
         redacted, count = pattern.subn(label, redacted)
         changed = changed or bool(count)
     return redacted, changed
+
+
+#: Characters a phonemiser turns into their Unicode names rather than sound.
+#: An emoji is not a word: "🦁" becomes "lion face", and a reply with three of
+#: them becomes unlistenable. The written transcript keeps every character —
+#: only the spoken copy is stripped, so nothing is hidden from the screen.
+_UNSPEAKABLE = re.compile(
+    "["
+    "\U0001f000-\U0001faff"  # pictographs, supplemental, extended-A, flags
+    "⌀-⏿"  # watches, alarm clocks, media symbols
+    "☀-➿"  # miscellaneous symbols and dingbats
+    "⬀-⯿"  # stars and arrows
+    "←-⇿"  # arrows
+    "■-◿"  # geometric shapes
+    "︀-️"  # variation selectors
+    "​-‏"  # zero-width joiners and direction marks
+    "  "  # line and paragraph separators
+    "•⃣"  # bullet, combining enclosing keycap
+    "©®™"  # copyright, registered, trade mark
+    "\U000e0000-\U000e007f"  # tag characters
+    "]"
+)
+
+_FENCED_CODE = re.compile(r"```[\s\S]*?```")
+_INLINE_CODE = re.compile(r"`([^`]*)`")
+_MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_BARE_URL = re.compile(r"https?://\S+")
+_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]*", re.MULTILINE)
+_BULLET = re.compile(r"^[ \t]*[-*+][ \t]+", re.MULTILINE)
+# Guarded on both sides so `speak_replies` keeps its underscore: a lone
+# separator inside a word is not emphasis.
+_STRONG = re.compile(r"(?<!\w)(\*\*|__)(\S(?:.*?\S)?)\1(?!\w)")
+_EMPHASIS = re.compile(r"(?<!\w)([*_])(\S(?:.*?\S)?)\1(?!\w)")
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _spoken_host(match: re.Match[str]) -> str:
+    """A URL read aloud in full is unbearable; the host is the useful part."""
+    from urllib.parse import urlparse  # noqa: PLC0415 - lazy, this is a cold path
+
+    host = urlparse(match.group(0).rstrip(".,;:!?)")).netloc
+    host = host.split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host.replace(".", " dot ") if host else ""
+
+
+def speakable_text(text: str) -> str:
+    """Strip what a phonemiser would recite rather than say (PRD FR-030).
+
+    Presentation only: emoji, markdown scaffolding and URL machinery. It never
+    rewords, never summarises and never adds anything the model did not say,
+    so what is heard is a subset of what is written — with one exception, a
+    fenced code block, which is announced rather than read out line by line.
+
+    Returns "" when nothing speakable is left. The caller decides what that
+    means; this function does not invent a sentence to fill the silence.
+    """
+    if not text:
+        return ""
+
+    spoken = _FENCED_CODE.sub(" a code block ", text)
+    spoken = _INLINE_CODE.sub(r"\1", spoken)
+    spoken = _MARKDOWN_LINK.sub(r"\1", spoken)
+    spoken = _BARE_URL.sub(_spoken_host, spoken)
+    spoken = _HEADING.sub("", spoken)
+    spoken = _BULLET.sub("", spoken)
+    spoken = _STRONG.sub(r"\2", spoken)
+    spoken = _EMPHASIS.sub(r"\2", spoken)
+    spoken = _UNSPEAKABLE.sub("", spoken)
+    return _WHITESPACE.sub(" ", spoken).strip()
+
+
+def prepare_for_speech(text: str) -> tuple[str, bool]:
+    """Make text legible aloud, then remove anything secret-shaped.
+
+    Order matters: stripping runs first so emphasis markers cannot hide a
+    credential from the patterns in :data:`SENSITIVE_PATTERNS`.
+    """
+    return redact_for_speech(speakable_text(text))
 
 
 class NullTtsProvider:
@@ -150,7 +232,7 @@ class KokoroTtsProvider:
     def synthesise(
         self, text: str, *, voice_id: str | None = None, speed: float = 1.0
     ) -> SynthesisResult:
-        spoken, redacted = redact_for_speech(text)
+        spoken, redacted = prepare_for_speech(text)
         if not spoken.strip():
             raise ValueError("there is nothing to speak")
 

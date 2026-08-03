@@ -202,9 +202,10 @@ class VoicePipeline:
     # -- the frame path ----------------------------------------------------
     def push_frame(self, chunk: AudioChunk) -> None:
         """One captured frame. Called from the audio thread."""
+        level = rms_level(chunk)
         if self._on_level is not None:
             try:
-                self._on_level(rms_level(chunk))
+                self._on_level(level)
             except Exception:  # noqa: BLE001
                 _LOG.exception("a level listener raised")
 
@@ -228,11 +229,13 @@ class VoicePipeline:
 
         # Waiting for a wake phrase: audio stays in the ring buffer only.
         self._buffer.write(chunk)
-        if not self._duplex.detection_enabled():
-            return
-        self._check_for_wake(chunk)
+        if self._duplex.detection_enabled():
+            self._check_for_wake(chunk, level)
+        # Recorded *after* the check, so the frame carrying a detection is not
+        # counted as part of the floor it has to clear (ADR-0028 defence 3).
+        self._duplex.note_captured_level(level)
 
-    def _check_for_wake(self, chunk: AudioChunk) -> None:
+    def _check_for_wake(self, chunk: AudioChunk, level: float) -> None:
         detector = self._wake
         if not getattr(detector, "available", False):
             return
@@ -252,9 +255,7 @@ class VoicePipeline:
             detected_at=utc_now(),
             during_playback=self._duplex.speaking,
         )
-        if not self._duplex.accept_detection(
-            event, threshold, captured_level=rms_level(chunk)
-        ):
+        if not self._duplex.accept_detection(event, threshold, captured_level=level):
             # Attributed to Jarvis's own output. Not a wake (ADR-0028).
             return
 

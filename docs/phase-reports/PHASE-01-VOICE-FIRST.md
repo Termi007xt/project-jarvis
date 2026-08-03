@@ -332,3 +332,124 @@ ends on silence via the voice activity detector.
 
 **Suite after these fixes: 745 passed, 2 skipped** (was 698). Security: 168
 passed, 1 skipped.
+
+---
+
+## 12. Acceptance round 6 — how it sounds (2026-08-04)
+
+Reported by the owner from real use. Four items, all accepted; a fifth —
+opening arbitrary applications with permission on first use — was deliberately
+deferred ("stability first") and is recorded in `docs/PROJECT_STATE.md` as the
+next design task rather than as a defect.
+
+### 12.1 The phonemiser was reading the decorations
+
+> "jarvis reads out emojis, dont need that... i meant the model speaks
+> 'grinning face with smile', 'lion face' etc"
+
+Not a bug in Kokoro: expanding a character to its Unicode name is exactly what a
+grapheme-to-phoneme front end is built to do when handed a character that has no
+pronunciation. The defect was upstream — nothing distinguished the string being
+*written* from the string being *said*, so markdown scaffolding, emoji and full
+URLs all went to synthesis verbatim.
+
+`speakable_text()` strips presentation only. It removes no words, so the spoken
+copy is a subset of the written one, with a single exception: a fenced code
+block is announced ("a code block") rather than recited line by line, because a
+truncated sentence is more confusing than a short description. URLs are read as
+their host — "music dot youtube dot com" — since the path and query are the part
+nobody can act on by ear.
+
+It runs **before** redaction rather than after. `**sk-live-abcdef123456**` must
+not be able to hide a credential behind emphasis markers that the FR-034
+patterns do not expect.
+
+### 12.2 Interruption never worked, and the code read as though it did
+
+> "i am not able to interrupt it for some reason."
+
+Three independent causes, none of them in the mechanism — `play()` polls
+`stop_requested` every 40 ms and always did.
+
+1. **`PLAYBACK_SCORE_MULTIPLIER = 1.6`** against a 0.6 threshold required a
+   detection to score 0.96 while Jarvis was speaking. openWakeWord effectively
+   never produces that. ADR-0028's "defence 3: raise the bar" had been tuned
+   into a closed door.
+2. **The self-echo test compared two different instruments.** It measured the
+   RMS of our own *output samples* and rejected any detection whose *microphone*
+   level did not exceed it. A desk microphone hearing a person across a room is
+   quieter than a waveform on its way to the speakers, so it rejected genuine
+   interruptions essentially always — while looking, in review, like a sensible
+   heuristic. This is the more interesting of the two: the first bug is a number
+   that is wrong, the second is a comparison that is meaningless, and only the
+   first would have shown up as a suspicious constant.
+3. **Emergency stop did not stop speech.** `JarvisCore.emergency_stop` reaches
+   the scheduler, the locks, the workers and the approval queue. Speech is none
+   of those, so the panic key cancelled everything and then talked over the
+   silence it had just made.
+
+Fixed by measuring the echo floor with the same instrument as the detection
+(`note_captured_level`, per playback window, fed from the pipeline *after* the
+wake check so a detection is not counted as part of the floor it must clear),
+lowering the multiplier to 1.15, and giving speech its own stop.
+
+The keyboard routes were made to work first and deliberately: acoustic barge-in
+needs thresholds measured in a real room, and until that measurement exists a
+route that does not depend on tuning is the only one that can be recommended.
+**Stop speaking** is separate from emergency stop because ADR-0028 says barge-in
+releases no locks and cancels no tasks — conflating them would make "be quiet"
+destructive.
+
+The Voice screen no longer claims Jarvis is interruptible when the microphone is
+closed, which was true whenever listening was off — i.e. by default.
+
+### 12.3 Narrating what the user can already see
+
+> "if i just say open brave, call tool and open, but dont need to speak."
+
+The obvious rule — "stay quiet when a tool succeeded" — is wrong: "what's the
+volume?" runs a tool and still deserves an answer. The distinction is between a
+request for *information* and an *instruction*, and it lives in the request, not
+in the results. `jarvis.audio.reply_policy` decides speak / cue / silent from
+the request, the reply and the tool outcomes, with three overrides that always
+speak: a failure, an unsuccessful tool, and a reply that asks a question.
+
+Decided in code rather than asked of the model. A model deciding whether to
+speak drifts, and the failure is invisible — nobody notices the sentence that
+was not said.
+
+### 12.4 "Open YouTube Music" opened a tab
+
+> "it always opens youtube music as a tab in brave, and never the pwa i
+> installed and pinned to my start menu"
+
+The entry handed `music.youtube.com` to the browser, which is a tab by
+definition. An installed progressive web app has its own window and its own
+taskbar identity, and Chromium launches it by app id. The vector is the same one
+the Start-menu shortcut uses:
+
+```
+...\Brave-Browser\Application\chrome_proxy.exe
+    --profile-directory=Default --app-id=cinhimbnkkaeohfgghhklpknlkffjgod
+```
+
+Fixed arguments on one catalogue entry — no new call site, no new argument kind,
+ADR-0029 untouched. It does not silently fall back to a tab if the app is not
+installed: a silent fallback is how "open YouTube Music" stopped meaning what
+was asked in the first place.
+
+### 12.5 Found while running the suite
+
+`tests/ui/test_voice_wiring.py` passed every assertion and then killed the
+interpreter with `0xC0000374` (heap corruption). Its fixture did not disable
+cues, so a cue thread still held a PortAudio output stream at teardown. Two
+fixes: the fixture, and — the real one — `VoiceController` now tracks cue
+threads so `shutdown()` waits for them. A cue fires on every wake, which makes
+it the most frequent thread in the application and the worst one to leave
+untracked.
+
+Worth recording that this was only ever visible in pytest's **exit code**, not
+in its output. A suite that reports "all passed" and returns `0xC0000374` is
+telling you something, and the summary line is not where it says it.
+
+**Suite after this round: 907 passed, 2 skipped** (was 832).
