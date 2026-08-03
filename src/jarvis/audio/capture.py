@@ -32,11 +32,23 @@ from jarvis.audio.ports import (
     AudioUnavailable,
 )
 
-__all__ = ["list_devices", "default_input_device", "CaptureSession", "capture_available"]
+__all__ = [
+    "list_devices",
+    "default_input_device",
+    "CaptureSession",
+    "capture_available",
+    "WASAPI",
+]
 
 _LOG = logging.getLogger(__name__)
 
 FRAME_SAMPLES = SAMPLE_RATE * FRAME_MILLISECONDS // 1000
+
+#: Windows exposes the same physical microphone through four host APIs, and they
+#: do not accept the same stream settings. WASAPI is the one that offers voice
+#: capture processing (ADR-0028 defence 2), and it is also the only one that
+#: accepts 16 kHz here — the others reject it unless PortAudio resamples for us.
+WASAPI = "Windows WASAPI"
 
 
 def capture_available() -> bool:
@@ -53,6 +65,18 @@ def _require_sounddevice():
     return sounddevice
 
 
+def host_api_names() -> tuple[str, ...]:
+    """Host API names by index, or empty if they cannot be read."""
+    if not capture_available():
+        return ()
+    try:
+        sounddevice = _require_sounddevice()
+        return tuple(str(api.get("name", "")) for api in sounddevice.query_hostapis())
+    except Exception:  # noqa: BLE001 - never break a screen over this
+        _LOG.exception("could not enumerate audio host APIs")
+        return ()
+
+
 def list_devices(*, inputs_only: bool = False) -> tuple[AudioDevice, ...]:
     """Enumerate devices for the Voice screen (PRD FR-016). Never raises."""
     if not capture_available():
@@ -60,6 +84,7 @@ def list_devices(*, inputs_only: bool = False) -> tuple[AudioDevice, ...]:
     try:
         sounddevice = _require_sounddevice()
         default_in, default_out = sounddevice.default.device
+        apis = host_api_names()
         devices: list[AudioDevice] = []
         for index, raw in enumerate(sounddevice.query_devices()):
             is_input = int(raw.get("max_input_channels", 0)) > 0
@@ -68,6 +93,7 @@ def list_devices(*, inputs_only: bool = False) -> tuple[AudioDevice, ...]:
                 continue
             if not is_input and not is_output:
                 continue
+            api_index = int(raw.get("hostapi", -1))
             devices.append(
                 AudioDevice(
                     index=index,
@@ -78,6 +104,10 @@ def list_devices(*, inputs_only: bool = False) -> tuple[AudioDevice, ...]:
                     default_sample_rate=float(raw.get("default_samplerate", SAMPLE_RATE)),
                     is_input=is_input,
                     is_default=index in (default_in, default_out),
+                    # Without this the same microphone appears three or four
+                    # times under identical names and the user cannot tell which
+                    # entry will actually open.
+                    host_api=apis[api_index] if 0 <= api_index < len(apis) else "",
                 )
             )
         return tuple(devices)
@@ -87,7 +117,43 @@ def list_devices(*, inputs_only: bool = False) -> tuple[AudioDevice, ...]:
 
 
 def default_input_device() -> AudioDevice | None:
-    return next((device for device in list_devices(inputs_only=True) if device.is_default), None)
+    """The best input to open, preferring WASAPI over the system default.
+
+    Windows reports its default input under MME, which rejects the settings
+    that give us echo cancellation and does not accept 16 kHz directly. When
+    the same microphone is also present under WASAPI, that entry is the better
+    one to open by every measure, so it wins.
+    """
+    inputs = list_devices(inputs_only=True)
+    if not inputs:
+        return None
+
+    system_default = next((device for device in inputs if device.is_default), None)
+    if system_default is not None and system_default.host_api != WASAPI:
+        same_microphone = next(
+            (
+                device
+                for device in inputs
+                if device.host_api == WASAPI
+                and _same_microphone(device.name, system_default.name)
+            ),
+            None,
+        )
+        if same_microphone is not None:
+            return same_microphone
+    if system_default is not None and system_default.host_api == WASAPI:
+        return system_default
+    return next(
+        (device for device in inputs if device.host_api == WASAPI), system_default
+    )
+
+
+def _same_microphone(left: str, right: str) -> bool:
+    """Match device names across host APIs, which truncate them differently."""
+    a, b = left.strip().lower(), right.strip().lower()
+    if not a or not b:
+        return False
+    return a.startswith(b[:24]) or b.startswith(a[:24])
 
 
 class CaptureSession:
@@ -144,23 +210,46 @@ class CaptureSession:
                 except Exception:  # noqa: BLE001 - never kill the audio thread
                     _LOG.exception("a capture consumer raised")
 
-        settings = None
-        try:
-            # ADR-0028 defence 2: ask Windows for its own voice-capture
-            # processing, which includes acoustic echo cancellation.
-            settings = sounddevice.WasapiSettings(auto_convert=True)
-        except Exception:  # noqa: BLE001 - not WASAPI, or not Windows
-            settings = None
-
-        self._stream = sounddevice.InputStream(
-            samplerate=self._sample_rate,
-            blocksize=self._frame_samples,
-            device=self._device_index,
-            channels=1,
-            dtype="float32",
-            callback=callback,
-            extra_settings=settings,
-        )
+        # WasapiSettings is only valid on a WASAPI device. Passing it to an MME
+        # or DirectSound device fails the open outright with
+        # "Incompatible host API specific stream info" — which is what happened
+        # on every microphone this machine reports by default, so nothing could
+        # ever record. Try the right settings for the device, then the other
+        # way, rather than assuming either.
+        attempts = self._stream_settings(sounddevice)
+        last_error: Exception | None = None
+        for settings in attempts:
+            try:
+                self._stream = sounddevice.InputStream(
+                    samplerate=self._sample_rate,
+                    blocksize=self._frame_samples,
+                    device=self._device_index,
+                    channels=1,
+                    dtype="float32",
+                    callback=callback,
+                    extra_settings=settings,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - try the other host API shape
+                last_error = exc
+                _LOG.debug(
+                    "could not open device %s with %s: %s",
+                    self._device_index,
+                    "voice-capture processing" if settings is not None else "no extra settings",
+                    exc,
+                )
+        if self._stream is None:
+            raise AudioUnavailable(
+                f"the microphone could not be opened: {last_error}"
+            ) from last_error
+        if attempts and attempts[0] is None:
+            # Said once, plainly: this device gives no echo cancellation, which
+            # is what ADR-0028 leans on to tell our own voice from the user's.
+            _LOG.info(
+                "device %s is not a WASAPI device, so Windows voice-capture "
+                "processing (including echo cancellation) is not available",
+                self._device_index,
+            )
         # The indicator goes on before the stream does. FR-013 is not satisfied
         # by an indicator that appears a moment after recording begins.
         self._announce(True)
@@ -172,6 +261,34 @@ class CaptureSession:
             raise
         self._running.set()
         return self
+
+    def _stream_settings(self, sounddevice) -> tuple[object | None, ...]:
+        """The settings to try, best first, for whichever device was chosen.
+
+        A WASAPI device wants ``WasapiSettings`` and rejects 16 kHz without it;
+        every other host API rejects the settings themselves. Getting this
+        backwards is not a degradation — the stream simply does not open.
+        """
+        wasapi = None
+        try:
+            wasapi = sounddevice.WasapiSettings(auto_convert=True)
+        except Exception:  # noqa: BLE001 - not Windows, or no WASAPI
+            return (None,)
+
+        if self._is_wasapi_device(sounddevice):
+            return (wasapi, None)
+        return (None, wasapi)
+
+    def _is_wasapi_device(self, sounddevice) -> bool:
+        try:
+            index = self._device_index
+            if index is None:
+                index = sounddevice.default.device[0]
+            api_index = int(sounddevice.query_devices(index)["hostapi"])
+            return str(sounddevice.query_hostapis(api_index)["name"]) == WASAPI
+        except Exception:  # noqa: BLE001 - unknown means try both orders
+            _LOG.debug("could not determine the host API for device %s", self._device_index)
+            return False
 
     def stop(self) -> None:
         self._running.clear()

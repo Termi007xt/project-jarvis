@@ -82,10 +82,15 @@ class AudioDevice:
     default_sample_rate: float
     is_input: bool
     is_default: bool = False
+    #: Which Windows host API exposes it. The same physical microphone appears
+    #: under several, with the same name and different behaviour, so leaving
+    #: this out made the list impossible to choose from.
+    host_api: str = ""
 
     def describe(self) -> str:
         suffix = " (default)" if self.is_default else ""
-        return f"{self.name}{suffix}"
+        api = f" — {self.host_api}" if self.host_api else ""
+        return f"{self.name}{api}{suffix}"
 
 
 @dataclass(frozen=True)
