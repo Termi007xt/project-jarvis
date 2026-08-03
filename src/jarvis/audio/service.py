@@ -300,6 +300,39 @@ class VoiceService:
     def capturing_command(self) -> bool:
         return self.pipeline.state is ListeningState.CAPTURING_COMMAND
 
+    # -- always-listening (ADR-0016, amended) ------------------------------
+    @property
+    def listening(self) -> bool:
+        return self.pipeline.state is not ListeningState.OFF and self.capturing
+
+    def start_listening(self, device_index: int | None = None) -> tuple[bool, str]:
+        """Listen for the wake phrase. Returns (started, why not).
+
+        ADR-0016 originally gated this on a *personal* enrolment. The owner
+        chose to run on the pretrained model instead, so the gate is now the
+        model being installed and loadable rather than an enrolment that does
+        not exist. What has and has not been measured is stated on the Voice
+        screen; nothing here implies a false-accept rate we have not measured.
+        """
+        reason = getattr(self.wake, "unavailable_reason", lambda: None)()
+        if reason:
+            return False, reason
+        if not self.capture_available:
+            return False, "No microphone is available."
+        if not self.start_capture(device_index):
+            return False, "The microphone could not be opened."
+
+        self.pipeline.set_always_listening(True)
+        self.pipeline.start_listening()
+        self._record("started listening for the wake phrase")
+        return True, ""
+
+    def stop_listening(self) -> None:
+        """Close the microphone and forget everything buffered."""
+        self.pipeline.set_always_listening(False)
+        self.stop_capture()
+        self._record("stopped listening")
+
     def set_command_listener(self, callback) -> None:
         """Where a finished spoken command goes. Nothing listened before."""
         self.pipeline.set_command_listener(callback)

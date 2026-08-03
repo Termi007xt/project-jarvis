@@ -55,9 +55,18 @@ touching your files.
   installed only once the detector genuinely starts. The model is never bundled
   and is licensed for **non-commercial use only**.
 - **The Voice screen's controls now work**: choosing a microphone, testing it
-  with a live level meter, measuring the room, and previewing a voice.
+  with a live level meter, measuring the room, and previewing a voice. The list
+  now names each device's audio system, so the same microphone appearing three
+  times is finally something you can choose between.
 - **A recording indicator.** The tray and the Voice screen both show whenever
   the microphone is open.
+- **A listening switch.** Turn on "Start listening" and Jarvis waits for
+  "Hey Jarvis", then transcribes what follows and answers it. It says plainly
+  that the wake model is a shared one that has not been tuned to your voice.
+- **Push-to-talk is now optional** and shows its key, so you can turn it off and
+  use the wake phrase instead.
+- **The Voice screen shows what it heard**, with a confidence figure, so a
+  misheard word looks like a mishearing rather than a bad answer.
 
 ### Changed
 
@@ -86,6 +95,19 @@ touching your files.
 - **Jarvis claimed it had spoken when it had not.** `voice.speak` reported a
   confirmed success on the strength of having produced audio, while nothing
   played it. It now fails plainly if no sound reached the output device.
+- **The emergency-stop hotkey never worked.** The key registered and the press
+  was then dropped on its way to the application. It also moved off `Pause`,
+  which many keyboards do not have, to **`Ctrl+Alt+End`**.
+- **Push-to-talk never worked**, for the same reason. F9 was never the problem.
+- **Desktop notifications from tools never appeared**, and the tool reported
+  showing them anyway.
+- **The recording indicator never lit**, so the microphone could open with
+  nothing on screen saying so.
+- **No microphone could be opened at all** on a machine whose default input is
+  an MME device — which is most of them. Jarvis asked every device for settings
+  only one kind of device accepts.
+- **Asking Jarvis to say something failed outright** with an internal error: it
+  reserved a lock by a name that does not exist.
 
 ### Known limitations
 

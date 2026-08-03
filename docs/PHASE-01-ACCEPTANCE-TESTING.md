@@ -30,11 +30,14 @@ Everything below assumes that activated shell.
 
 **Two things worth knowing up front:**
 
-- **F9 is now globally captured** while Jarvis runs. Your IDE's debug controls
-  and Excel's recalculate will not see it. That is expected, and it is why the
-  key is configurable — tell me if it is intolerable.
-- **`Ctrl+Alt+Pause` stops all automation.** It is the panic button. Nothing in
-  this phase can do much damage, but use it if anything feels wrong.
+- **F9 is globally captured** while Jarvis runs, unless you untick Push-to-talk
+  on the Voice screen. Your IDE's debug controls and Excel's recalculate will
+  not see it while it is on.
+- **`Ctrl+Alt+End` stops all automation.** It is the panic button. It moved off
+  `Ctrl+Alt+Pause` because your keyboard has no Pause key — and it is worth
+  knowing that **it never actually worked before now**, on any keyboard.
+  If you use Remote Desktop, note that `Ctrl+Alt+End` means Ctrl+Alt+Del inside
+  an RDP session; tell me and I'll move it again.
 
 ---
 
@@ -216,11 +219,45 @@ Then from Conversation: `Say hello to me out loud`.
 
 **This is what I could not test at all. Please spend the most time here.**
 
-### 8.1 Push-to-talk (the verified route)
+### 8.0 Just talk to it — the way you asked for
+
+> **New.** Always-listening no longer waits for an enrolment that does not
+> exist (ADR-0016 amendment). The wake model is installed and the toggle is
+> live.
+
+**Voice** screen → **Start listening**.
+
+The button becomes "Stop listening", the tray shows the recording state, and the
+screen says *"Listening for 'Hey Jarvis'."* The microphone stays open until you
+stop it — mute it at the hardware if you want it off without touching Jarvis.
+
+Then say: **"Hey Jarvis, what is the time?"**
+
+**Expect:** the wake phrase is stripped, the Voice screen shows
+`Heard: "what is the time?"` with a confidence figure, the Conversation window
+comes forward with it as your message, and Jarvis answers. It then goes back to
+waiting for the next "Hey Jarvis".
+
+Verified here end to end without a microphone: wake score **0.932**, transcript
+`"what is the time?"` at confidence 0.71, returning to waiting.
+
+**Report:**
+- Does it wake on "Hey Jarvis" in your room, with your voice?
+- **How many false wakes in an hour of normal talking?** This is the number I
+  most need, and the one thing nobody has measured. If it is intrusive, tell me
+  and I will raise the threshold from 0.6.
+- Is the transcript accurate? Send me any funny ones.
+
+### 8.1 Push-to-talk (now optional)
 
 > **Correction to the previous guide: it is not hold-to-talk.** `RegisterHotKey`
 > reports the key *press* only — Windows gives no release event — so holding F9
 > was never going to work. It is press-to-start.
+>
+> **F9 was never the problem.** It registered correctly every time; the
+> keypress was then dropped on its way to the application, and separately the
+> microphone could not open at all. Both are fixed. There is now a
+> **Push-to-talk** checkbox on the Voice screen if you would rather not have it.
 
 1. **Press F9** (do not hold). A notification says "Listening", the tray turns
    to the recording state, and the Voice screen says **"Recording — speak now."**
@@ -297,13 +334,19 @@ talks.
 
 ## 9. Emergency stop and hotkeys
 
-- Press **`Ctrl+Alt+Pause`** at any time.
+- Press **`Ctrl+Alt+End`** at any time.
 - **Expect:** a notification saying exactly what was stopped.
+
+> This is worth a real test. It has never worked from the keyboard until now —
+> the key registered and the press was silently discarded before it reached the
+> application. It is the panic button, so it earning its name matters.
 
 **Report:**
 - Did the hotkey work from inside another application (a game, an IDE)?
-- Did **F9** break anything you use? Be honest — it is a global hook and I
-  expect this to be the most annoying decision in the phase.
+- Did **F9** break anything you use? You can now turn it off on the Voice
+  screen if it is a nuisance.
+- If a hotkey cannot be registered, you should now get a **notification** saying
+  so, not just a line in the log. Did you see one?
 
 ---
 

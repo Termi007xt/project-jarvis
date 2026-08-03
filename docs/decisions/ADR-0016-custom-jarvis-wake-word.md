@@ -167,3 +167,63 @@ ADR-0027 (approval and activation interaction model — push-to-talk hotkey),
 ADR-0028 (barge-in and full-duplex audio), ADR-0014 (voice licensing — the
 parallel redistribution question that Option D avoids), PRD §12.1, §16 item 9,
 FR-010, FR-011, FR-018.
+
+---
+
+## Amendment — 2026-08-03: always-listening no longer waits for enrolment
+
+**Decided by the project owner during Phase 1 acceptance testing.**
+
+### What changed
+
+Criterion 2 said always-listening stays off until a *personal* enrolment has
+been measured and passed. Enrolment is not built. The consequence in the
+shipped build was not a careful degradation but a dead end: the Voice screen
+stated "not enrolled, so Jarvis is not listening", the toggle was permanently
+disabled, and the only alternative route — push-to-talk — was itself broken.
+There was no way for the user to talk to Jarvis at all.
+
+The owner, told plainly what had and had not been measured, chose to run on the
+pretrained model: *"let it always listen. all good, no probs i can always mute
+my mic myself."*
+
+**The gate is now whether the wake detector actually loads**, not whether an
+enrolment exists. `VoiceService.start_listening` returns `(False, reason)` when
+the model is missing or the microphone will not open, and the Voice screen shows
+that reason.
+
+### What has actually been measured
+
+On synthesised speech, not on the owner's voice or in the owner's room:
+
+| Set | Score | Detected |
+|---|---|---|
+| "Hey Jarvis" ×6 | 0.994–0.998 | 6/6 |
+| Bare "Jarvis" ×4 | 0.268–0.464 | 0/4 |
+| Unrelated speech ×5 | ~0.000 | 0/5 |
+| "Hey Travis" | 0.489 | 0/1 |
+
+End to end through the pipeline: wake score 0.932, phrase stripped, transcript
+`"what is the time?"` at confidence 0.71, returning to `waiting_for_wake`.
+
+**The false-accept rate during ordinary conversation is still unmeasured.** The
+GUI says so rather than implying a reliability nobody has established. That is
+the part of criterion 2 that survives: the honesty requirement, not the block.
+
+### Why this is not a weakening of the decision
+
+Criterion 2 existed to stop the product *claiming* a wake word worked when its
+quality was unknown. That protection is intact — the screen states that the
+model is shared, not tuned to this voice, and that misses and false wakes are
+expected. What is removed is a block that, with enrolment unbuilt, only ever
+prevented the feature from being used at all.
+
+FR-011 is untouched: bare "Jarvis" is still not detected, is still measured as
+such, and the screen still refuses to imply otherwise
+(`VoicePanel.claims_single_word_phrase`).
+
+### Still open
+
+Per-user enrolment (Path 1) remains the plan, and its button remains visible,
+disabled and labelled with its phase. When it exists, an enrolled profile should
+raise the quality bar rather than gate access to the feature.

@@ -231,7 +231,10 @@ class LoggingConfig(_Base):
 class UiConfig(_Base):
     start_minimised_to_tray: bool = True
     show_unavailable_features: bool = True
-    emergency_stop_hotkey: str = "Ctrl+Alt+Pause"
+    #: Not Pause: many compact and tenkeyless keyboards have no Pause key at
+    #: all, which makes the panic button unreachable on the hardware most
+    #: likely to need it. End is present on every layout.
+    emergency_stop_hotkey: str = "Ctrl+Alt+End"
     #: PRD FR-002. Registered per-user, so it never needs elevation (ADR-0009).
     start_at_sign_in: bool = False
     #: An unanswered approval is denied after this long (ADR-0027). Bounded by

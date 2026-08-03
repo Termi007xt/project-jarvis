@@ -49,11 +49,16 @@ class VoiceController(QObject):
 
     #: A finished spoken command, already on the GUI thread.
     commandHeard = Signal(str)
+    #: The same command as text plus confidence, for the Voice screen. Shown so
+    #: a misheard word is visibly a mishearing rather than a bad answer.
+    heard = Signal(str, object)
     levelChanged = Signal(float)
     listeningStateChanged = Signal(str)
     noticed = Signal(str, str)  # title, message — shown as a tray notification
     calibrated = Signal(str)
     busyChanged = Signal(bool)
+    #: A setting the user changed here that the core should persist.
+    settingChanged = Signal(str, object)
 
     def __init__(self, voice: object, panel: object, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -68,6 +73,7 @@ class VoiceController(QObject):
         self.listeningStateChanged.connect(
             self._on_state, Qt.ConnectionType.QueuedConnection
         )
+        self.heard.connect(self._on_heard, Qt.ConnectionType.QueuedConnection)
 
         voice.set_command_listener(self._command_from_audio_thread)  # type: ignore[attr-defined]
         voice.set_state_listener(self._state_from_audio_thread)  # type: ignore[attr-defined]
@@ -83,12 +89,16 @@ class VoiceController(QObject):
         panel.calibrateRequested.connect(self.calibrate)  # type: ignore[attr-defined]
         panel.previewVoiceRequested.connect(self.preview_voice)  # type: ignore[attr-defined]
         panel.enrolRequested.connect(self._enrolment_not_built)  # type: ignore[attr-defined]
+        panel.alwaysListeningToggled.connect(self.set_listening)  # type: ignore[attr-defined]
+        panel.pushToTalkToggled.connect(self.set_push_to_talk_enabled)  # type: ignore[attr-defined]
 
     # -- callbacks from the audio thread -----------------------------------
     def _command_from_audio_thread(self, command: CommandHeard) -> None:
         if command is None or command.empty:
+            self.heard.emit("", None)
             return
         _LOG.info("heard a command by %s", command.route.value)
+        self.heard.emit(command.text, command.transcript.confidence)
         self.commandHeard.emit(command.text)
 
     def _state_from_audio_thread(self, state: ListeningState) -> None:
@@ -104,6 +114,42 @@ class VoiceController(QObject):
     def _on_state(self, state: str) -> None:
         self._panel.set_listening_state(state)  # type: ignore[attr-defined]
 
+    def _on_heard(self, text: str, confidence: object) -> None:
+        self._panel.set_last_heard(  # type: ignore[attr-defined]
+            text, confidence if isinstance(confidence, float) else None
+        )
+
+    # -- listening (FR-010, ADR-0016 as amended) ---------------------------
+    def set_listening(self, listening: bool) -> None:
+        """Start or stop waiting for the wake phrase, on the user's say-so."""
+        if not listening:
+            self._voice.stop_listening()  # type: ignore[attr-defined]
+            self._panel.set_listening(False)  # type: ignore[attr-defined]
+            self.settingChanged.emit("audio.wake_word.always_listening", False)
+            self.noticed.emit("Stopped listening", "The microphone is closed.")
+            return
+
+        started, reason = self._voice.start_listening()  # type: ignore[attr-defined]
+        self._panel.set_listening(started)  # type: ignore[attr-defined]
+        if not started:
+            self.noticed.emit("Could not start listening", reason)
+            return
+        self.settingChanged.emit("audio.wake_word.always_listening", True)
+        self.noticed.emit(
+            "Listening",
+            'Say "Hey Jarvis" followed by what you want. The microphone stays '
+            "open until you stop it.",
+        )
+
+    def set_push_to_talk_enabled(self, enabled: bool) -> None:
+        self.settingChanged.emit("audio.wake_word.push_to_talk_enabled", enabled)
+        self.noticed.emit(
+            "Push-to-talk " + ("enabled" if enabled else "disabled"),
+            "The hotkey is registered while Jarvis runs."
+            if enabled
+            else "The hotkey no longer starts a recording.",
+        )
+
     # -- push to talk (FR-018) ---------------------------------------------
     def toggle_push_to_talk(self) -> None:
         """F9. Press to start, and again to cut it short.
@@ -113,6 +159,13 @@ class VoiceController(QObject):
         activity detector hears silence.
         """
         voice = self._voice
+        if not self._panel.push_to_talk_toggle.isChecked():  # type: ignore[attr-defined]
+            # Turned off deliberately. Say so rather than opening the mic.
+            self.noticed.emit(
+                "Push-to-talk is turned off",
+                "Turn it back on from the Voice screen, or use the wake phrase.",
+            )
+            return
         if voice.capturing_command:  # type: ignore[attr-defined]
             self._run_off_thread("end-push-to-talk", self._end_push_to_talk)
             return

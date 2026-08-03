@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QThread, QTimer
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from jarvis import APP_NAME
@@ -41,6 +41,16 @@ _LOG = logging.getLogger(__name__)
 
 class JarvisApplication(QObject):
     """Composition of core, tray and window."""
+
+    #: The only safe way to get work from a non-Qt thread onto the GUI thread.
+    #: ``QTimer.singleShot`` looks like it does this and does not: a timer
+    #: cannot be created on a thread Qt did not start, so the callback is
+    #: silently dropped. That killed both global hotkeys — including the
+    #: emergency stop — the recording indicator and every tool notification.
+    #: A queued signal is delivered on the receiver's thread, from any caller.
+    hotkeyFired = Signal(str)
+    recordingChanged = Signal(bool)
+    notificationRequested = Signal(str, str)
 
     def __init__(self, core: JarvisCore, app: QApplication) -> None:
         super().__init__()
@@ -109,12 +119,27 @@ class JarvisApplication(QObject):
         controller.commandHeard.connect(self._on_command_heard)
         controller.noticed.connect(self.tray.notify)
         controller.calibrated.connect(self.window.voice_panel().set_calibration)
+        controller.settingChanged.connect(self._persist_setting)
         return controller
+
+    def _persist_setting(self, key_path: str, value: object) -> None:
+        """A choice made on the Voice screen must survive a restart."""
+        try:
+            self._core.set_setting(key_path, value)
+        except Exception:  # noqa: BLE001 - a bad save must not kill the shell
+            _LOG.exception("could not persist '%s'", key_path)
+            self.tray.notify(
+                "That setting was not saved",
+                f"'{key_path}' could not be written. It applies for this session only.",
+            )
 
     def _set_recording_indicator(self, recording: bool) -> None:
         """Runs on the audio thread, so it only queues work onto the GUI one."""
+        self.recordingChanged.emit(recording)
+
+    def _on_recording_changed(self, recording: bool) -> None:
         self._recording = recording
-        QTimer.singleShot(0, self._apply_state)
+        self._apply_state()
 
     def _on_command_heard(self, text: str) -> None:
         """A spoken command becomes an ordinary conversation turn."""
@@ -143,6 +168,14 @@ class JarvisApplication(QObject):
         self.window.removeWakeModelRequested.connect(self.remove_wake_model)
 
         self.bridge.eventReceived.connect(self._on_event)
+
+        # Queued explicitly: every one of these is emitted from a thread Qt did
+        # not create — the hotkey message loop, the audio callback, and a tool
+        # running on the invoker's worker.
+        queued = Qt.ConnectionType.QueuedConnection
+        self.hotkeyFired.connect(self._on_hotkey, queued)
+        self.recordingChanged.connect(self._on_recording_changed, queued)
+        self.notificationRequested.connect(self.tray.notify, queued)
 
     # -- event handling ----------------------------------------------------
     def _on_event(self, event: Event) -> None:
@@ -412,9 +445,14 @@ class JarvisApplication(QObject):
         self.window.refresh_voice()
 
     def _notify_from_tool(self, title: str, message: str) -> bool:
-        """Backs the ``notify.show`` tool. Runs on whichever thread calls it."""
+        """Backs the ``notify.show`` tool. Runs on whichever thread calls it.
+
+        Always a worker thread in practice, which is why this must be a signal:
+        the previous ``QTimer.singleShot`` never fired, so the tool reported a
+        notification it had not shown.
+        """
         try:
-            QTimer.singleShot(0, lambda: self.tray.notify(title, message))
+            self.notificationRequested.emit(title, message)
         except Exception:  # noqa: BLE001 - the tool reports failure honestly
             _LOG.exception("could not show a notification")
             return False
@@ -424,21 +462,21 @@ class JarvisApplication(QObject):
     def _register_hotkeys(self) -> GlobalHotkeys:
         """Emergency stop and push-to-talk, both configurable.
 
-        Hotkey callbacks arrive on the hotkey thread, so they only ever queue
-        work onto the Qt thread — touching widgets from there would be a
-        cross-thread violation Qt would not survive.
+        Hotkey callbacks arrive on the hotkey thread, which Qt did not start.
+        They emit a queued signal and nothing else — a ``QTimer`` created there
+        never fires, which is why both of these silently did nothing at all.
         """
         config = self._core.config
         hotkeys = GlobalHotkeys()
         hotkeys.add(
             "emergency_stop",
             config.ui.emergency_stop_hotkey,
-            lambda: QTimer.singleShot(0, self.emergency_stop_from_hotkey),
+            lambda: self.hotkeyFired.emit("emergency_stop"),
         )
         hotkeys.add(
             "push_to_talk",
             config.audio.wake_word.push_to_talk_hotkey,
-            lambda: QTimer.singleShot(0, self.push_to_talk),
+            lambda: self.hotkeyFired.emit("push_to_talk"),
         )
         hotkeys.start()
 
@@ -446,7 +484,21 @@ class JarvisApplication(QObject):
             # Never silently missing: the user asked for this key and did not
             # get it, and only they can resolve the conflict (ADR-0010).
             _LOG.warning("hotkey unavailable — %s", binding.describe())
+            self.tray.notify(
+                "A hotkey is not available",
+                f"{binding.requested} could not be registered — another "
+                "application already owns it. Change it in Settings.",
+            )
         return hotkeys
+
+    def _on_hotkey(self, name: str) -> None:
+        """Runs on the GUI thread, whatever thread pressed the key."""
+        if name == "emergency_stop":
+            self.emergency_stop_from_hotkey()
+        elif name == "push_to_talk":
+            self.push_to_talk()
+        else:  # pragma: no cover - the table above is closed
+            _LOG.warning("no action for hotkey '%s'", name)
 
     def emergency_stop_from_hotkey(self) -> None:
         report = self._core.emergency_stop(origin="hotkey")

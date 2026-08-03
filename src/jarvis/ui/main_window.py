@@ -443,6 +443,20 @@ class MainWindow(QMainWindow):
                 passed=voice.enrolment_passed,
                 enrolled=config.audio.wake_word.enrolled,
             )
+            # Listening needs the detector to load and a microphone to open —
+            # not an enrolment, which does not exist in this build.
+            wake_reason = getattr(voice.wake, "unavailable_reason", lambda: None)()
+            if wake_reason:
+                panel.set_listening_available(False, wake_reason)
+            elif not voice.capture_available:
+                panel.set_listening_available(False, "No microphone is available.")
+            else:
+                panel.set_listening_available(True)
+            panel.set_listening(voice.listening)
+            panel.set_push_to_talk(
+                config.audio.wake_word.push_to_talk_enabled,
+                config.audio.wake_word.push_to_talk_hotkey,
+            )
         else:
             panel.set_enrolment(
                 "The voice stack is not running, so no enrolment has been measured.",

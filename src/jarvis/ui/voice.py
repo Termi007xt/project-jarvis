@@ -18,6 +18,7 @@ import logging
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -56,6 +57,7 @@ class VoicePanel(QWidget):
     previewVoiceRequested = Signal(str)
     enrolRequested = Signal()
     alwaysListeningToggled = Signal(bool)
+    pushToTalkToggled = Signal(bool)
     installModelRequested = Signal()
     removeModelRequested = Signal()
 
@@ -123,17 +125,38 @@ class VoicePanel(QWidget):
         self.enrol_button.clicked.connect(self.enrolRequested.emit)
         enrolment_row.addWidget(self.enrol_button)
 
-        self.always_listening_button = QPushButton("Enable always-listening")
-        self.always_listening_button.setAccessibleName("Enable always-listening")
-        self.always_listening_button.setCheckable(True)
-        self.always_listening_button.toggled.connect(self.alwaysListeningToggled.emit)
-        enrolment_row.addWidget(self.always_listening_button)
         enrolment_row.addStretch(1)
         layout.addLayout(enrolment_row)
 
         self.enrolment_status = QLabel()
         self.enrolment_status.setWordWrap(True)
         layout.addWidget(self.enrolment_status)
+
+        # -- talking to Jarvis (FR-010, FR-018) ---------------------------
+        listen_row = QHBoxLayout()
+        self.listen_button = QPushButton("Start listening")
+        self.listen_button.setAccessibleName("Start listening for the wake phrase")
+        self.listen_button.setCheckable(True)
+        self.listen_button.toggled.connect(self.alwaysListeningToggled.emit)
+        listen_row.addWidget(self.listen_button)
+
+        self.push_to_talk_toggle = QCheckBox("Push-to-talk")
+        self.push_to_talk_toggle.setAccessibleName("Push to talk")
+        self.push_to_talk_toggle.toggled.connect(self.pushToTalkToggled.emit)
+        listen_row.addWidget(self.push_to_talk_toggle)
+        listen_row.addStretch(1)
+        layout.addLayout(listen_row)
+
+        #: What Jarvis last heard. Without this the only evidence a command was
+        #: understood is the answer, which makes a misheard word look like a
+        #: model failure rather than a transcription one.
+        self.heard_label = QLabel("Nothing has been heard yet.")
+        self.heard_label.setWordWrap(True)
+        self.heard_label.setAccessibleName("Last transcribed command")
+        self.heard_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.heard_label)
 
         # -- microphone (FR-016, FR-017) ----------------------------------
         device_row = QHBoxLayout()
@@ -222,30 +245,51 @@ class VoicePanel(QWidget):
 
     def set_phrase(self, phrase: str, *, enrolled: bool) -> None:
         """State the phrase literally. Never label it 'Jarvis' (FR-011)."""
-        if enrolled:
-            self.phrase_label.setText(f'Wake phrase: "{phrase}" — enrolled')
-        else:
-            self.phrase_label.setText(
-                f'Wake phrase: "{phrase}" — not enrolled, so Jarvis is not listening'
-            )
+        self.phrase_label.setText(f'Wake phrase: "{phrase}"')
         self.disclosure.setText(phrase_disclosure(phrase))
 
     def set_enrolment(self, summary: str, *, passed: bool, enrolled: bool) -> None:
-        """Show the measurement, and gate always-listening on it (ADR-0016)."""
+        """Show what has been measured. Never imply more than that."""
         self.enrolment_status.setText(summary)
-        # Criterion 2: below the bar, always-listening is not offered at all.
-        self.always_listening_button.setEnabled(enrolled and passed)
-        if not enrolled:
-            self.always_listening_button.setToolTip(
-                "Record wake-word samples first. Push-to-talk works meanwhile."
+
+    def set_listening_available(self, available: bool, reason: str = "") -> None:
+        """Listening needs the wake model and a microphone — nothing more.
+
+        ADR-0016 originally required a personal enrolment first. The owner
+        chose the pretrained model instead (amendment, 2026-08-03), so the gate
+        is now whether the detector actually loads. The wording still refuses
+        to claim a false-accept rate nobody has measured on this voice.
+        """
+        self.listen_button.setEnabled(available)
+        self.listen_button.setToolTip(
+            reason
+            or (
+                "Uses the shared pretrained model. It has not been tuned to "
+                "your voice, so occasional misses and false wakes are expected."
             )
-        elif not passed:
-            self.always_listening_button.setToolTip(
-                "Enrolment did not meet the quality bar, so always-listening "
-                "stays off. Push-to-talk still works."
-            )
-        else:
-            self.always_listening_button.setToolTip("")
+        )
+
+    def set_listening(self, listening: bool) -> None:
+        blocked = self.listen_button.blockSignals(True)
+        self.listen_button.setChecked(listening)
+        self.listen_button.setText("Stop listening" if listening else "Start listening")
+        self.listen_button.blockSignals(blocked)
+
+    def set_push_to_talk(self, enabled: bool, hotkey: str = "") -> None:
+        blocked = self.push_to_talk_toggle.blockSignals(True)
+        self.push_to_talk_toggle.setChecked(enabled)
+        self.push_to_talk_toggle.setText(
+            f"Push-to-talk ({hotkey})" if hotkey else "Push-to-talk"
+        )
+        self.push_to_talk_toggle.blockSignals(blocked)
+
+    def set_last_heard(self, text: str, confidence: float | None = None) -> None:
+        """Show the transcript, so a misheard word is visibly a mishearing."""
+        if not text.strip():
+            self.heard_label.setText("Nothing was heard.")
+            return
+        suffix = f"  (confidence {confidence:.0%})" if confidence is not None else ""
+        self.heard_label.setText(f'Heard: "{text}"{suffix}')
 
     def set_devices(self, devices: tuple[object, ...], selected_index: int | None = None) -> None:
         blocked = self.device_box.blockSignals(True)

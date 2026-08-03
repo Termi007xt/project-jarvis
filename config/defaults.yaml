@@ -150,7 +150,9 @@ logging:
 ui:
   start_minimised_to_tray: true
   show_unavailable_features: true
-  emergency_stop_hotkey: "Ctrl+Alt+Pause"
+  # Not Pause: many compact and tenkeyless keyboards have no Pause key, which
+  # leaves the panic button unreachable. End exists on every layout.
+  emergency_stop_hotkey: "Ctrl+Alt+End"
   start_at_sign_in: false
   approval_timeout_seconds: 120.0
 

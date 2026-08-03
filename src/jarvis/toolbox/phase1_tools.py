@@ -358,7 +358,9 @@ class SpeakTool:
         output_model=SpeakOutput,
         risk=RiskLevel.LOW,
         required_capabilities=("voice.speak",),
-        resource_locks=("audio_output",),
+        # "audio_output" was not a lock this system knows, so every attempt to
+        # speak died in the invoker with a ValueError the user saw raw.
+        resource_locks=("speaker_output",),
         timeout_seconds=120.0,
         retry_policy=RetryPolicy(max_attempts=1),
         changes_state=False,
