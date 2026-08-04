@@ -67,7 +67,17 @@ Taken on the target machine, 2026-08-04, by `tools/browser-lab/test_cdp_attach.p
 
 This ADR was written expecting the first row to fail — Chromium refuses remote debugging against its default user-data directory, and ADR-0019 Option A selects a profile inside it. The expectation was wrong for Brave 151, and the measurement is recorded rather than the expectation.
 
-`tools/browser-lab/test_playwright_attach.py` covers the second half — that `connect_over_cdp` attaches to a browser started this way and that a result list is addressable by index.
+`tools/browser-lab/test_playwright_attach.py` covers the second half, measured the same day:
+
+| Question | Result |
+|---|---|
+| Does `connect_over_cdp` attach to a browser started by `launch_argv`? | **Yes.** Attached, 1 context, against `Chrome/151.0.7922.71` |
+| Process-creation call sites in `src/` | **Still 1** (`launch_argv`) |
+| Is a YouTube result list addressable by index? | **Yes.** 13 × `ytd-video-renderer`, DOM order matching screen order |
+
+The second question is the one that matters beyond this ADR. "Play the second video" resolves to `results[1]` — a *position*. Nothing needs to match text, so a page that can rename itself cannot redirect the action. The run incidentally demonstrated the point: the first result was titled "NVIDIA is Selling Lies", a title that reads like an assertion and influences nothing, because no code path consults it.
+
+That property is what `tests/security/test_prompt_injection.py` will assert against in stage 1, and it is now known to be available rather than hoped for.
 
 ## Consequences
 

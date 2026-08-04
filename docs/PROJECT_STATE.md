@@ -1,14 +1,22 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-04
-- **Current branch:** `feat/PHASE-1-development` — ready to merge
+- **Last updated:** 2026-08-04 (Phase 2 stage 0)
+- **Current branch:** `feat/PHASE-2-development`. Phase 1 **is already merged** —
+  `main` is at `b9e73e0`, merge of PR #2.
 - **Version:** `0.2.0.dev0`
-- **Active phase:** **Phase 1 — CLOSED, accepted by the owner 2026-08-04**
-- **Next phase:** **Phase 2 — deterministic desktop and browser automation**,
-  not started. `docs/BACKLOG.md` §5 is the plan.
-- **Overall status:** Green. `python -m pytest` → **916 passed, 2 skipped**
-  (Phase 0 baseline 386; 698 → 745 → 832 → 907 → 916). Nothing is blocked.
+- **Active phase:** **Phase 2 — deterministic desktop and browser automation.**
+  **Stage 0 in progress.** Plan: `docs/phase-plans/PHASE-02-PLAN.md`.
+  Work items: `docs/BACKLOG.md` §5.
+- **Delivery mode:** **checkpoint after every stage** (decided 2026-08-04, and
+  deliberately *not* Phase 1's continuous run — see the plan §2.1/§2.2).
+- **Overall status:** Green. `python -m pytest` → **916 passed, 2 skipped**,
+  exit 0, with the new `automation` extra installed. Nothing is blocked.
+
+> **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
+> add another `-q` — two of them suppress pytest's final `N passed` line, which
+> looks alarmingly like a truncated crash and is not one. Run
+> `python -m pytest` bare.
 
 ### Phase 1 is accepted
 
@@ -132,7 +140,39 @@ that change what the product can do:
 
 ## In Progress
 
-Nothing. Phase 1 is closed and accepted; Phase 2 has not started.
+**Phase 2, stage 0 — "measure and unblock".** Nothing in stage 0 is a feature;
+all of it gates something. Plan: `docs/phase-plans/PHASE-02-PLAN.md` §5.
+
+| Stage 0 item | Status |
+|---|---|
+| CDP spike part A — does Brave open a debugging port? | **Done.** Measured |
+| `automation` optional extra with lazy imports | **Done.** Suite still green |
+| CDP spike part B — Playwright attach + index-addressable results | **Done.** Measured |
+| ADR-0018, ADR-0019, ADR-0023, ADR-0031 | **Done.** Recorded |
+| YouTube Music defect | **Diagnosed, not fixed.** See `docs/BACKLOG.md` §4.6.1 |
+| Fixes for the three diagnosed defects | **Not started** — the remaining stage 0 work |
+
+### What stage 0 measured, on this machine, 2026-08-04
+
+Both spikes live in `tools/browser-lab/` and are outside the product runtime and
+outside the security policy, the same status `tools/voice-lab/` holds.
+
+- **Brave 151 opens a CDP port under ADR-0019 Option A** (`--profile-directory=Jarvis`)
+  **and** under Option B (`--user-data-dir=<temp>`). The plan predicted Option A
+  would be refused; the prediction was wrong. Option A stands as the owner chose,
+  and the pre-authorised Option B fallback is not needed.
+- **`connect_over_cdp` attaches to a browser started by `launch_argv`.** Process-creation
+  call sites in `src/` remain exactly **one**. ADR-0029 is consumed, not widened.
+- **A YouTube result page yields 13 `ytd-video-renderer` rows in DOM order.**
+  "The second video" is `results[1]` — a position, never a title match. This is
+  the structural control stage 1 is built around, and it is now known available
+  rather than assumed.
+- **Re-measuring requires Brave to be closed first.** A second `brave.exe` hands
+  its command line to the running instance and exits, so a refused flag and a
+  handed-off launch are indistinguishable.
+- Running the spike **created the `Jarvis` Brave profile**, which FR-056 wants
+  anyway. The owner signs into it once for whatever Jarvis should reach; it is
+  persistent. Decided 2026-08-04, recorded in ADR-0019.
 
 ## Blocked or Failing
 
@@ -244,33 +284,57 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Phase 1 is closed. Start here, in a new session.**
+**Phase 1 is merged. Phase 2 stage 0 is nearly complete. Start here.**
 
-1. **Merge `feat/PHASE-1-development` into `main`.** The branch is accepted, the
-   suite is green and the documentation is current. Nothing on it is in flight.
+1. **Finish stage 0: fix the three YouTube Music defects.** They are fully
+   diagnosed in `docs/BACKLOG.md` §4.6.1, with the evidence. Write the test
+   first — this is state-related. In rough order of value:
+   - **Stop `youtube_music` claiming `verified`** when all it observed was that
+     Brave was already running. Real verification needs a *window*, which is
+     UI Automation, which is P2-WIN-08 in stage 4. Until then the honest outcome
+     is `unverified`, and the rule to encode is that **a verification target must
+     be able to distinguish "my effect happened" from "something unrelated was
+     already true."**
+   - **Let the planner see the catalogue.** It called `web.open_url` for
+     "open YouTube Music" because nothing in the tool schema told it YouTube Music
+     was an application it could open. Catalogue-driven valid values in
+     `OpenApplicationInput` fixes the mis-routing and the `youtube-music`
+     guess in one change.
+   - **Honest failure when an argument is not supported** — "play Sunflower on
+     YouTube Music" currently fails with *"does not take an argument"*, which
+     says what is wrong but not what is possible (ADR-0010).
 
-2. **Read `docs/BACKLOG.md` §5** — Phase 2, deterministic desktop and browser
-   automation. Its exit criterion *"Search RTX 5070 on YouTube and play the
-   second video"* is the shape of the whole phase: UI Automation before
-   coordinates, DOM selectors before pixels, and a foreground-control lock
-   acquired before anything moves.
+2. **Then request the stage 0 checkpoint.** Do not start stage 1 without it;
+   the delivery mode is checkpoint-per-stage (plan §2.1).
 
-3. **Expect the prompt-injection defence to get its first real exercise.**
-   Phase 2 is where untrusted content — web pages, search results, page titles —
-   first enters the system. The rule is already written and already tested in
-   principle: web content can inform a plan, it can never authorise a
-   capability. Phase 2 is where that stops being theoretical.
+3. **Stage 1 is the untrusted-content boundary — built before anything can fetch
+   a page.** A typed `Observation` that is untrusted by construction, plus
+   `tests/security/test_prompt_injection.py` against a fixture, with no browser
+   behind it. The ordering is the point: a defence built after the capability
+   gets shaped to fit whatever the capability happened to emit. Stage 0 proved
+   the structural control is available — results are index-addressable, so
+   selection is positional and a page cannot rename its way into redirecting an
+   action.
 
-4. **Two small Phase 1 leftovers worth doing early**, because both are cheap and
-   both are visible every day: **a time/date tool**, and the **YouTube Music
-   app-id** defect. Neither is architectural.
+4. **Do not let Playwright launch a browser.** `launch`, `launch_persistent_context`
+   and `executable_path` must not appear in `src/`. `tests/security/test_no_shell.py`
+   AST-scans `src/` only, so a Playwright launch would create a process the
+   scanner cannot see and the suite would stay green while ADR-0029's invariant
+   was false. ADR-0031 records this and requires a test asserting it.
 
-5. **The application-catalogue ADR**, when stability allows. Start-menu
-   discovery as the executable source (machine state, never model output),
-   approval on first use, persisted entries, a `.lnk` parser that runs nothing,
-   and care around the `powershell.exe` shortcut every Start menu contains.
-   ADR-0029 constraint 3 survives by construction: the model still names an
-   *entry*, never a binary. Progressive web apps come free with it.
+5. **Deferred to stage 6, deliberately:** the time/date tool (gates nothing) and
+   the application-catalogue work (P2-WIN-01, behind its own ADR — Start-menu
+   discovery as the executable source, approval on first use, a `.lnk` parser
+   that runs nothing, care around the `powershell.exe` shortcut every Start menu
+   contains).
+
+6. **Graphify is stale and cannot update without an LLM API key.** `graphify .
+   --update` exits reporting `no LLM API key found`; 17 changed docs need
+   semantic extraction, including ADR-0027…ADR-0031 and this document. Set
+   `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`) as a **user
+   environment variable — never in the repo** — then re-run. `--code-only` was
+   deliberately not used: it may prune the existing doc nodes from a committed
+   `graph.json`. Nothing in the Phase 2 plan depends on the graph.
 
 ### Carry these habits into Phase 2
 
@@ -285,10 +349,23 @@ model (configured, not benchmarked).
   of what went wrong.
 
 ## Uncommitted or Temporary State
-Nothing uncommitted. Phase 1 is complete on `feat/PHASE-1-development`, branched
-from `df4a35b`, and the branch is ready to merge into `main`. Nothing is stubbed
-to report false success; every unbuilt screen and menu entry still names its
-phase (ADR-0010).
+Nothing uncommitted. Phase 1 is merged into `main` (`b9e73e0`, PR #2). Phase 2
+work is on `feat/PHASE-2-development`. Nothing is stubbed to report false
+success; every unbuilt screen and menu entry still names its phase (ADR-0010).
+
+**Environment changes made during stage 0**, so a fresh checkout is not
+surprised by them:
+
+- `pip install -e ".[automation]"` was run, adding playwright 1.62.0,
+  pywinauto 0.6.9, comtypes, pywin32, pyee and greenlet to `.venv`. Required to
+  run `tools/browser-lab/test_playwright_attach.py`.
+- `playwright install` was **not** run and must not be. The product drives the
+  user's real Brave, never a bundled Chromium (ADR-0019, ADR-0031).
+- A **`Jarvis` Brave profile now exists** at
+  `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Jarvis`, created by the
+  spike. It is empty and signed out. Note it lives **outside the vault**, so
+  FR-057 and any full-deletion path must delete it explicitly — recorded as a
+  requirement in ADR-0019.
 
 No temporary migrations or compatibility shims. No process needs to be running;
 Ollama is optional. `tools/voice-lab/` and `tools/qwen-tts-lab/` are research

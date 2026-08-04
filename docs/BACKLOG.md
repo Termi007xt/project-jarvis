@@ -356,13 +356,41 @@ close, recorded here rather than left in a session transcript:
 | Item | Origin | Note |
 |---|---|---|
 | Voice interruption does not work on real hardware | Acceptance 8.3 | Shipped as `duplex_mode: half`, which FR-015 permits and the GUI states. `Ctrl+Alt+End` and tray **Stop speaking** work. Needs a measurement, not a rewrite |
-| "Open YouTube Music" opens a tab, not the installed app | Acceptance 5 | The app-id vector is correct and tested; the `chrome_proxy.exe` route did not take effect on this machine. Likely the profile directory or the app id |
+| "Open YouTube Music" opens a tab, not the installed app | Acceptance 5 | **Diagnosed 2026-08-04 from the audit log — it is three defects, and none of them is the app id.** See §4.6.1 |
 | No time or date capability | Acceptance 3 | The most obvious question to ask a voice assistant, and it can only be answered from the model, which cannot know. A small verifiable tool |
 | Arbitrary application launching with first-use permission | Owner request, 2026-08-04 | Deferred for stability. Needs its own ADR: Start-menu discovery as the executable source, approval on first use, persisted entries, a `.lnk` parser that runs nothing. ADR-0029 constraint 3 is preserved by construction |
 | Progress speech during long work (FR-033) | P1-AUD-09 | Not built. Matters once Phase 2 has work long enough to report progress on |
 | Spoken notifications by event type (FR-181) | P1-UI-03 | Notifications ship; choosing which are spoken does not |
 | Per-user wake enrolment (ADR-0016 Path 1) | P1-AUD-01 | Measurement types, threshold fitting and the quality bar exist and are tested; the recording flow and personal verifier do not |
 | Startup entry is named `pythonw.exe` | Acceptance 10 | Correct behaviour for a source checkout — there is no executable to name yet. Phase 6 packaging (ADR-0013, ADR-0022) resolves it |
+
+### 4.6.1 "Open YouTube Music opens a tab" — diagnosed 2026-08-04
+
+Recorded because the original hypothesis was wrong and a wrong hypothesis in a
+backlog costs more than no hypothesis. This entry previously read *"likely the
+profile directory or the app id."* All three candidate causes were checked
+against the machine and eliminated:
+
+- The installed PWA is `cinhimbnkkaeohfgghhklpknlkffjgod` — **identical** to
+  `_YOUTUBE_MUSIC_APP_ID` in `jarvis/toolbox/launch.py`.
+- It is installed under the `Default` profile, which is what the entry passes.
+- The Start-menu shortcut's own target and arguments are **byte-for-byte
+  identical** to the vector `build_argv` produces.
+
+The catalogue entry is correct. What the audit log shows instead:
+
+| # | Defect | Evidence | Where it is fixed |
+|---|---|---|---|
+| 1 | **The verification is vacuous.** The entry declares `verify_process_names=("brave.exe",)`, and Brave is usually already running, so `process_running` returns true whether or not an app window opened | Every `app.open` for YouTube Music recorded `succeeded / verified`, which proves nothing about the effect | Needs **window-level** verification, i.e. UI Automation. P2-WIN-08. Until then the entry must not claim `verified` |
+| 2 | **The model called the wrong tool.** On acceptance day it invoked `web.open_url` with `https://music.youtube.com`. A URL handed to a browser opens a tab by definition; `app.open` was never involved | `2026-08-04T05:52:49 tool=web.open_url {"url": "https://music.youtube.com"} → succeeded/verified` | The tool schema does not tell the planner *which* applications exist, so it cannot know YouTube Music is openable as an app |
+| 3 | **Alias and argument brittleness** | `{"application": "youtube-music"}` → `unknown_application`; `{"application": "YouTube Music", "argument": "Sunflower"}` → *"does not take an argument"* | Catalogue-driven valid values in the schema; an honest failure message that says what *can* be done |
+
+Defect 1 is the one that matters beyond this feature. It is the third instance of
+the same family — Phase 1 shipped `voice.speak` reporting verified success for a
+silent room, and `app.open` reporting a launch it had not observed. **A tool that
+verifies against a condition it does not control is not verifying.** The rule this
+adds: a verification target must be able to distinguish "my effect happened" from
+"something unrelated was already true."
 
 ---
 
