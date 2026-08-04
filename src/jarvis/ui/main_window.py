@@ -46,15 +46,14 @@ class NavArea:
 #: PRD section 9.3, in order. ``live`` means the panel shows real runtime data.
 NAV_AREAS: tuple[NavArea, ...] = (
     NavArea("home", "Home", 0, True),
-    NavArea("conversation", "Conversation", 1, False,
-            "Voice and text conversation with the local model."),
+    NavArea("conversation", "Conversation", 1, True),
     NavArea("tasks", "Tasks", 0, True),
     NavArea("skills", "Skills", 3, False, "Recorded and editable reusable workflows."),
     NavArea("memory", "Memory", 3, False, "Reviewable memories and memory candidates."),
     NavArea("applications", "Applications", 2, False,
             "The application catalogue, aliases and launch verification."),
     NavArea("models", "Models", 0, True),
-    NavArea("voice", "Voice", 1, False, "Voice selection, preview, rate and volume."),
+    NavArea("voice", "Voice", 1, True),
     NavArea("permissions", "Permissions", 0, True),
     NavArea("integrations", "Integrations", 6, False,
             "Optional external providers, configured with your own keys."),
@@ -172,11 +171,124 @@ class _TablePanel(QWidget):
         self.empty_label.setText(empty_message if not rows else "")
 
 
+class _PermissionsPanel(QWidget):
+    """Active grants, and any approval currently waiting for an answer.
+
+    The panel exists because ADR-0027's approval surface is non-modal: a request
+    the user dismissed or never saw must still be findable and answerable, with
+    a keyboard, from inside the window.
+    """
+
+    refreshRequested = Signal()
+    answered = Signal(str, bool)  # approval_id, allow
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        heading = QLabel("Permissions")
+        heading.setStyleSheet("font-size: 20px; font-weight: 600;")
+        header.addWidget(heading)
+        header.addStretch(1)
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setAccessibleName("Refresh Permissions")
+        self.refresh_button.clicked.connect(self.refreshRequested.emit)
+        header.addWidget(self.refresh_button)
+        layout.addLayout(header)
+
+        self.pending_heading = QLabel("Waiting for your decision")
+        self.pending_heading.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.pending_heading)
+
+        self.pending_list = QListWidget()
+        self.pending_list.setAccessibleName("Pending approvals")
+        self.pending_list.setMaximumHeight(120)
+        layout.addWidget(self.pending_list)
+
+        actions = QHBoxLayout()
+        self.allow_button = QPushButton("Allow once")
+        self.allow_button.setAccessibleName("Allow the selected request once")
+        self.allow_button.clicked.connect(lambda: self._answer(True))
+        self.deny_button = QPushButton("Deny")
+        self.deny_button.setAccessibleName("Deny the selected request")
+        self.deny_button.clicked.connect(lambda: self._answer(False))
+        actions.addWidget(self.allow_button)
+        actions.addWidget(self.deny_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(
+            ["Capability", "Risk", "Decision", "Scope", "Scope reference", "Granted by"]
+        )
+        self.table.setAccessibleName("Permission grants table")
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.table, 1)
+
+        self.empty_label = QLabel("")
+        self.empty_label.setStyleSheet("color: palette(mid);")
+        layout.addWidget(self.empty_label)
+
+        self.set_pending(())
+
+    def set_rows(self, rows: list[list[str]], empty_message: str = "Nothing to show.") -> None:
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for column_index, value in enumerate(row):
+                self.table.setItem(row_index, column_index, QTableWidgetItem(value))
+        self.empty_label.setText(empty_message if not rows else "")
+
+    def set_pending(self, pending: tuple[object, ...]) -> None:
+        selected = self.selected_approval_id()
+        self.pending_list.clear()
+        for entry in pending:
+            request = entry.request  # type: ignore[attr-defined]
+            item = QListWidgetItem(
+                f"{request.action_summary}  ·  {request.risk.value} risk  ·  "
+                f"{int(entry.seconds_remaining())}s left"  # type: ignore[attr-defined]
+            )
+            item.setData(Qt.ItemDataRole.UserRole, request.approval_id)
+            self.pending_list.addItem(item)
+            if request.approval_id == selected:
+                self.pending_list.setCurrentItem(item)
+
+        waiting = bool(pending)
+        if waiting and self.pending_list.currentItem() is None:
+            self.pending_list.setCurrentRow(0)
+        self.pending_heading.setText(
+            "Waiting for your decision" if waiting else "Nothing is waiting for a decision"
+        )
+        self.pending_list.setVisible(waiting)
+        self.allow_button.setEnabled(waiting)
+        self.deny_button.setEnabled(waiting)
+
+    def selected_approval_id(self) -> str | None:
+        item = self.pending_list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+    def _answer(self, allow: bool) -> None:
+        approval_id = self.selected_approval_id()
+        if approval_id:
+            self.answered.emit(approval_id, allow)
+
+
 class MainWindow(QMainWindow):
     """Navigation shell over live core state."""
 
     emergencyStopRequested = Signal()
     healthCheckRequested = Signal()
+    approvalAnswered = Signal(str, bool)
+    conversationSendRequested = Signal(str)
+    privateSessionToggled = Signal(bool)
+    historyClearRequested = Signal()
+    installWakeModelRequested = Signal()
+    removeWakeModelRequested = Signal()
+    userNameChanged = Signal(str)
 
     def __init__(self, core: JarvisCore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -220,6 +332,23 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(panel)
 
     def _live_panel(self, area: NavArea) -> QWidget:
+        if area.key == "voice":
+            from jarvis.ui.voice import VoicePanel
+
+            panel = VoicePanel()
+            panel.installModelRequested.connect(self.installWakeModelRequested.emit)
+            panel.removeModelRequested.connect(self.removeWakeModelRequested.emit)
+            return panel
+        if area.key == "conversation":
+            from jarvis.ui.conversation import ConversationPanel
+
+            panel = ConversationPanel(self._core)
+            panel.sendRequested.connect(self.conversationSendRequested.emit)
+            panel.privateSessionToggled.connect(self.privateSessionToggled.emit)
+            panel.historyCleared.connect(self.historyClearRequested.emit)
+            panel.userNameChanged.connect(self.userNameChanged.emit)
+            panel.set_user_name(self._core.config.ui.user_name)
+            return panel
         if area.key == "home":
             panel = _TextPanel("Home")
             panel.refreshRequested.connect(self.refresh_all)
@@ -243,11 +372,9 @@ class MainWindow(QMainWindow):
             panel.refreshRequested.connect(self.refresh_tasks)
             return panel
         if area.key == "permissions":
-            panel = _TablePanel(
-                "Permissions",
-                ["Capability", "Risk", "Decision", "Scope", "Scope reference", "Granted by"],
-            )
+            panel = _PermissionsPanel()
             panel.refreshRequested.connect(self.refresh_permissions)
+            panel.answered.connect(self.approvalAnswered.emit)
             return panel
         if area.key == "audit":
             panel = _TablePanel("Audit log", ["Time", "Category", "Actor", "Summary", "Result"])
@@ -268,12 +395,93 @@ class MainWindow(QMainWindow):
     # -- refresh -----------------------------------------------------------
     def refresh_all(self) -> None:
         self.refresh_home()
+        self.refresh_conversation()
+        self.refresh_voice()
         self.refresh_tasks()
         self.refresh_permissions()
         self.refresh_audit()
         self.refresh_models()
         self.refresh_developer()
         self.refresh_about()
+
+    def refresh_voice(self) -> None:
+        """Report the voice stack exactly as it is (ADR-0010, FR-011)."""
+        from jarvis.audio.availability import describe_voice_stack
+        from jarvis.audio.capture import list_devices
+        from jarvis.audio.wake import wake_model_path
+
+        panel = self.voice_panel()
+        config = self._core.config
+        panel.set_stack_status(
+            describe_voice_stack(config, wake_model_path(self._core.paths.root))
+        )
+        panel.set_phrase(
+            config.audio.wake_word.phrase, enrolled=config.audio.wake_word.enrolled
+        )
+
+        from jarvis.audio.wake_install import (
+            is_installed,
+            model_directory,
+            verify_detector_loads,
+        )
+
+        installed = is_installed(self._core.paths.root)
+        loads, error = verify_detector_loads(self._core.paths.root) if installed else (False, None)
+        panel.set_model_state(
+            model_directory(self._core.paths.root),
+            installed and loads,
+            (
+                "The detector initialises."
+                if loads
+                else (error or "Not installed. Push-to-talk works without it.")
+            ),
+        )
+
+        voice = getattr(self._core, "voice", None)
+        if voice is not None:
+            panel.set_voices(tuple(voice.tts.voices()))
+            panel.set_duplex(voice.pipeline.duplex.describe_mode())
+            panel.set_enrolment(
+                voice.enrolment_summary(),
+                passed=voice.enrolment_passed,
+                enrolled=config.audio.wake_word.enrolled,
+            )
+            # Listening needs the detector to load and a microphone to open —
+            # not an enrolment, which does not exist in this build.
+            wake_reason = getattr(voice.wake, "unavailable_reason", lambda: None)()
+            if wake_reason:
+                panel.set_listening_available(False, wake_reason)
+            elif not voice.capture_available:
+                panel.set_listening_available(False, "No microphone is available.")
+            else:
+                panel.set_listening_available(True)
+            panel.set_listening(voice.listening)
+            panel.set_push_to_talk(
+                config.audio.wake_word.push_to_talk_enabled,
+                config.audio.wake_word.push_to_talk_hotkey,
+            )
+        else:
+            panel.set_enrolment(
+                "The voice stack is not running, so no enrolment has been measured.",
+                passed=False,
+                enrolled=False,
+            )
+        panel.set_devices(list_devices(inputs_only=True))
+
+    def voice_panel(self):
+        from jarvis.ui.voice import VoicePanel
+
+        panel = self._panels["voice"]
+        assert isinstance(panel, VoicePanel)
+        return panel
+
+    def refresh_conversation(self) -> None:
+        panel = self.conversation_panel()
+        engine = getattr(self._core, "conversation", None)
+        if engine is None:
+            panel.set_availability(False, "The conversation engine is not running.")
+            return
+        panel.set_availability(engine.available, engine.unavailable_reason())
 
     def refresh_home(self) -> None:
         status = self._core.status()
@@ -293,10 +501,33 @@ class MainWindow(QMainWindow):
             "",
             f"Local model runtime    {health.describe() if health else 'not checked yet'}",
             f"Startup recovery       {recovery.describe() if recovery else 'not run'}",
+        ]
+
+        secrets = getattr(self._core, "secrets", None)
+        if secrets is not None:
+            lines.append(
+                f"Protected secrets      "
+                f"{'available' if secrets.available else secrets.unavailable_reason()}"
+            )
+
+        engine = getattr(self._core, "conversation", None)
+        if engine is not None:
+            lines.append(
+                f"Conversation           "
+                f"{'ready' if engine.available else (engine.unavailable_reason() or 'unavailable')}"
+            )
+
+        from jarvis.audio.availability import describe_voice_stack
+
+        voice = describe_voice_stack(self._core.config)
+        lines += ["", "Voice stack", "-----------"]
+        lines += [f"  {component.describe()}" for component in voice.components]
+
+        lines += [
             "",
-            "Phase 0 has no voice, no automation, no browser control and no filesystem",
-            "tools. It is the foundation: configuration, storage, events, audit,",
-            "permissions, the tool pipeline and the task state machine.",
+            "Phase 1 adds voice and conversation. It performs no desktop or browser",
+            "automation beyond opening an approved application or URL, and has no",
+            "filesystem tools, screen capture or clipboard access.",
         ]
         self._text("home").set_text("\n".join(lines))
 
@@ -319,23 +550,26 @@ class MainWindow(QMainWindow):
         from jarvis.core.permissions.catalogue import CAPABILITIES
 
         grants = self._core.permissions.list_grants(active_only=True)
-        rows = [
-            [
-                grant.capability_id,
-                getattr(CAPABILITIES.get(grant.capability_id), "risk", None).value
-                if CAPABILITIES.get(grant.capability_id)
-                else "unknown",
-                grant.decision.value,
-                grant.scope.value,
-                grant.scope_ref or "—",
-                grant.created_by,
-            ]
-            for grant in grants
-        ]
-        self._table("permissions").set_rows(
+        rows = []
+        for grant in grants:
+            capability = CAPABILITIES.get(grant.capability_id)
+            rows.append(
+                [
+                    grant.capability_id,
+                    capability.risk.value if capability is not None else "unknown",
+                    grant.decision.value,
+                    grant.scope.value,
+                    grant.scope_ref or "—",
+                    grant.created_by,
+                ]
+            )
+        self._permissions_panel().set_rows(
             rows,
             "No active permission grants. Every capability will ask before it runs.",
         )
+
+    def set_pending_approvals(self, pending: tuple[object, ...]) -> None:
+        self._permissions_panel().set_pending(pending)
 
     def refresh_audit(self) -> None:
         records = self._core.audit.query(limit=300)
@@ -454,6 +688,18 @@ class MainWindow(QMainWindow):
     def _table(self, key: str) -> _TablePanel:
         panel = self._panels[key]
         assert isinstance(panel, _TablePanel)
+        return panel
+
+    def _permissions_panel(self) -> _PermissionsPanel:
+        panel = self._panels["permissions"]
+        assert isinstance(panel, _PermissionsPanel)
+        return panel
+
+    def conversation_panel(self):
+        from jarvis.ui.conversation import ConversationPanel
+
+        panel = self._panels["conversation"]
+        assert isinstance(panel, ConversationPanel)
         return panel
 
     def show_area(self, key: str) -> None:

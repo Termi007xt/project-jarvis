@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from jarvis import APP_VERSION
+from jarvis.audio.service import VoiceService
 from jarvis.common import new_id
 from jarvis.config.paths import VaultPaths
 from jarvis.config.schema import AppConfig, NetworkMode
@@ -32,10 +33,18 @@ from jarvis.core.events.types import (
 )
 from jarvis.core.permissions.engine import DefaultPolicy, PermissionEngine
 from jarvis.core.permissions.models import Decision, GrantScope
+from jarvis.core.secrets import SecretStore
+from jarvis.core.tools.approvals import ApprovalQueue
 from jarvis.core.tools.invoker import ToolCall, ToolInvoker
-from jarvis.core.tools.ports import ApprovalPort, DenyingApprovalPort
+from jarvis.core.tools.ports import ApprovalPort
 from jarvis.core.tools.registry import ToolRegistry
+from jarvis.llm.conversation import ConversationEngine
+from jarvis.llm.history import Conversation, ConversationStore
+from jarvis.llm.ollama.chat import OllamaChatProvider
 from jarvis.llm.ollama.health import OllamaHealth, OllamaHealthChecker
+from jarvis.llm.personality import PersonalityStore
+from jarvis.llm.ports import ModelRole
+from jarvis.llm.routing import ModelRouter
 from jarvis.runtime.single_instance import SingleInstanceGuard
 from jarvis.runtime.workers import PeriodicWorker, WorkerSupervisor
 from jarvis.storage.database import Database
@@ -50,6 +59,8 @@ from jarvis.tasks.recovery import (
 from jarvis.tasks.scheduler import TaskScheduler
 from jarvis.tasks.states import TaskState
 from jarvis.tasks.store import TaskStore
+from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
+from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
 from jarvis.toolbox.system_health import HealthCheckRunner, SystemHealthTool
 
 __all__ = ["JarvisCore", "CoreStatus", "EmergencyStopReport"]
@@ -64,13 +75,17 @@ class EmergencyStopReport:
     cancelled_task_ids: tuple[str, ...]
     released_locks: tuple[str, ...]
     stopped_workers: tuple[str, ...]
+    denied_approvals: int = 0
 
     def describe(self) -> str:
-        return (
+        text = (
             f"Stopped: {len(self.cancelled_task_ids)} task(s), "
             f"{len(self.released_locks)} resource lock(s), "
             f"{len(self.stopped_workers)} worker(s)."
         )
+        if self.denied_approvals:
+            text += f" Denied {self.denied_approvals} pending approval(s)."
+        return text
 
 
 @dataclass(frozen=True)
@@ -98,6 +113,7 @@ class JarvisCore:
         *,
         config_store: ConfigStore | None = None,
         approvals: ApprovalPort | None = None,
+        approval_timeout_seconds: float | None = None,
         single_instance: SingleInstanceGuard | None = None,
         enforce_single_instance: bool = True,
         session_id: str | None = None,
@@ -107,7 +123,11 @@ class JarvisCore:
         self.session_id = session_id or new_id()
 
         self._config_store = config_store or ConfigStore(self.paths)
-        self._approvals = approvals or DenyingApprovalPort()
+        # An injected port replaces the queue entirely (tests do this). Otherwise
+        # the core owns a queue, which denies until a UI declares itself
+        # connected — silence is never consent (ADR-0010).
+        self._injected_approvals = approvals
+        self._approval_timeout_seconds = approval_timeout_seconds
         self._enforce_single_instance = enforce_single_instance
         self._guard = single_instance or SingleInstanceGuard(
             lock_file=self.paths.runtime_dir / "single-instance.lock",
@@ -125,6 +145,14 @@ class JarvisCore:
         self.audit: AuditLog
         self.permissions: PermissionEngine
         self.registry: ToolRegistry
+        self.approvals: ApprovalQueue | None = None
+        self.secrets: SecretStore
+        self.models: ModelRouter
+        self.history: ConversationStore
+        self.personality: PersonalityStore
+        self.conversation: ConversationEngine
+        self.voice: VoiceService
+        self.applications: ApplicationCatalogue
         self.invoker: ToolInvoker
         self.tasks: TaskStore
         self.locks: ResourceLockManager
@@ -172,6 +200,24 @@ class JarvisCore:
             ),
         )
         self.registry = ToolRegistry(self.audit, self.events)
+        self.secrets = SecretStore(self.database, self.audit)
+
+        # 6b. the approval surface's queue (ADR-0027). It denies everything
+        # until a user interface calls set_interactive(True).
+        approval_port: ApprovalPort
+        if self._injected_approvals is None:
+            self.approvals = ApprovalQueue(
+                audit=self.audit,
+                event_bus=self.events,
+                timeout_seconds=(
+                    self._approval_timeout_seconds
+                    if self._approval_timeout_seconds is not None
+                    else self.config.ui.approval_timeout_seconds
+                ),
+            )
+            approval_port = self.approvals
+        else:
+            approval_port = self._injected_approvals
 
         # 7. tasks and locks
         self.tasks = TaskStore(self.database, self.audit, self.events, self.instance_id)
@@ -183,7 +229,7 @@ class JarvisCore:
             self.permissions,
             self.audit,
             locks=self.locks,
-            approvals=self._approvals,
+            approvals=approval_port,
             event_bus=self.events,
             database=self.database,
         )
@@ -207,8 +253,30 @@ class JarvisCore:
             event_bus=self.events,
         )
 
-        # 9. Phase 0 tools, runners and bootstrap grants
+        # 8b. conversation (Phase 1). The provider is constructed even when
+        # Ollama is unreachable, so the Conversation screen can say why rather
+        # than the feature simply being absent (ADR-0010).
+        self.models = ModelRouter(self.config)
+        self.history = ConversationStore(self.database, self.audit)
+        self.personality = PersonalityStore(self.database, self.audit)
+        self.personality.ensure_default()
+        self.conversation = self._build_conversation_engine()
+
+        # 8c. voice (Phase 1). Constructed whatever is installed, so the Voice
+        # screen reports each component's real state rather than the feature
+        # being absent (ADR-0010).
+        self.voice = VoiceService(self.config, self.paths.root, audit=self.audit)
+
+        # 9. tools, runners and bootstrap grants
         self.registry.register(SystemHealthTool(self.config, self.paths))
+        self.applications = default_catalogue(self.config)
+        register_phase1_tools(
+            self.registry,
+            self.applications,
+            speak=self.voice.speak,
+            # ``notify`` needs a shell; the UI supplies it via attach_shell().
+            notify=None,
+        )
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
 
@@ -250,6 +318,48 @@ class JarvisCore:
         )
         return self
 
+    def attach_shell(self, notify: object) -> str | None:
+        """Let the shell supply what only it can: desktop notifications.
+
+        ``notify.show`` is registered here rather than at start-up because
+        without a shell there is nothing to show a notification on, and a tool
+        that always fails looks like a defect rather than an absence (ADR-0010).
+        """
+        if self.registry.get(NotifyTool.spec.tool_id) is not None:
+            return None
+        self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
+        return NotifyTool.spec.tool_id
+
+    def _build_conversation_engine(self) -> ConversationEngine:
+        planner = self.models.resolve(ModelRole.CONVERSATION)
+        provider = OllamaChatProvider(
+            self.config.llm.ollama.base_url,
+            planner.name,
+            timeout_seconds=self.config.tasks.step_timeout_seconds,
+            require_loopback=self.config.llm.ollama.require_loopback,
+            network_mode=self.config.network.mode,
+            context_length=planner.context_length,
+        )
+        return ConversationEngine(
+            provider,
+            self.invoker,
+            history=self.history,
+            personality=self.personality,
+            registry=self.registry,
+            session_id=self.session_id,
+            user_name=self.config.ui.user_name,
+        )
+
+    def start_conversation(
+        self, title: str = "Conversation", *, private: bool = False
+    ) -> Conversation:
+        """Begin a conversation. A private one writes nothing (FR-046, AT-014)."""
+        return self.history.start(
+            title,
+            persist=False if private else None,
+            model=self.models.resolve(ModelRole.CONVERSATION).name,
+        )
+
     def _seed_bootstrap_grants(self) -> None:
         """Grant the two strictly self-inspecting capabilities on first start.
 
@@ -290,6 +400,13 @@ class JarvisCore:
 
         self.events.publish(AppStopping(source="core", instance_id=self.instance_id, reason=reason))
 
+        if self.approvals is not None:
+            self.approvals.set_interactive(False)
+        # The microphone closes before anything else, so the recording
+        # indicator can never outlive the capture it describes (FR-013).
+        voice = getattr(self, "voice", None)
+        if voice is not None:
+            voice.shutdown()
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)
@@ -322,11 +439,15 @@ class JarvisCore:
         cancelled = self.scheduler.emergency_stop()
         released = self.locks.release_all_for_instance()
         stopped_workers = self.workers.stop_all(timeout_seconds=2.0)
+        # A request still on screen would otherwise authorise work into a
+        # runtime that has just been told to stop.
+        denied = self.approvals.deny_all("emergency stop") if self.approvals else 0
 
         report = EmergencyStopReport(
             cancelled_task_ids=cancelled,
             released_locks=released,
             stopped_workers=stopped_workers,
+            denied_approvals=denied,
         )
         self.audit.record(
             AuditCategory.SECURITY,
@@ -363,6 +484,24 @@ class JarvisCore:
         self.events.publish(
             ConfigChanged(source="core", key_path=key_path, previous=previous, current=value)
         )
+        # The chat provider captured the network mode and the model name when it
+        # was built, so a settings change has to rebuild it. Otherwise switching
+        # to offline mode would leave a provider that still opens sockets.
+        # ui.user_name is in here because the model is told the name in the
+        # system prompt, which is built when the engine is.
+        if self._started and (
+            key_path.startswith(("network.", "models.", "llm."))
+            or key_path == "ui.user_name"
+        ):
+            self.models.update(self.config)
+            self.conversation = self._build_conversation_engine()
+            # The speech model hubs read their offline switch when a model
+            # loads, which may be long after this, so re-pin them now (AT-001).
+            voice = getattr(self, "voice", None)
+            if voice is not None:
+                voice._config = self.config  # noqa: SLF001 - keep it in step
+                voice.apply_network_policy()
+
         if key_path == "network.mode":
             self.events.publish(
                 NetworkModeChanged(source="core", previous=str(previous), current=str(value))

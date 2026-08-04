@@ -4,10 +4,190 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0.dev0] — 2026-08-04 — Phase 1: voice-first local assistant
 
-Nothing yet. Phase 1 (voice-first local assistant) has not started; it is
-awaiting review of Phase 0.
+**Phase 1 is closed.** All five PRD §21 exit criteria were met and confirmed by
+user acceptance testing on 2026-08-04. What it did *not* close is listed under
+Known limitations below and carried into Phase 2 in `docs/BACKLOG.md` §4.6 —
+none of it silently.
+
+Jarvis can now hold a conversation, hear you, speak back, and open the handful
+of applications and websites you have approved. It still performs **no other
+desktop or browser automation** — no clicking, typing, reading the screen or
+touching your files.
+
+### Added
+
+- **Approval dialog.** Consequential actions can finally be authorised, which
+  unblocks every capability beyond the two self-inspection grants. The prompt
+  is anchored to the tray and does **not** take focus, so being asked never
+  disturbs what you are doing. An unanswered request expires and is recorded as
+  denied — silence is never taken as consent. Denials can be remembered per
+  application, site or folder, and a waiting request is reachable from the tray
+  and the Permissions screen without a mouse.
+- **Local conversation.** A Conversation screen that talks to the local model.
+  Every reply says where it came from — the model itself, a retrieved fact, an
+  inference, a confirmed tool result, or an admission of uncertainty — and
+  Jarvis will not tell you something was done unless a tool confirmed it.
+- **Conversation history, with real controls.** History can be turned off
+  globally or for one conversation, and deleted. A **private session** writes
+  nothing to disk at all rather than writing and cleaning up afterwards.
+- **A voice.** Kokoro `bm_george` for speech, faster-whisper `small` for
+  listening, both running locally. Anything that looks like a password, key,
+  card number or verification code is replaced with a description of what it
+  was *before* Jarvis says it out loud.
+- **Push-to-talk on F9** and an emergency-stop hotkey on `Ctrl+Alt+Pause`, both
+  configurable. A combination another application already owns is reported as
+  unavailable rather than silently doing nothing.
+- **A Voice screen** showing which components are installed, which microphone is
+  selected, and each voice's licence. It states the wake phrase literally and
+  says plainly that single-word "Jarvis" is not available in this build.
+- **Protected secret storage** using the Windows Data Protection API.
+- **Start Jarvis at sign-in**, as a per-user setting that never needs
+  administrator rights.
+- **`--require-healthy`** for `--check`, when a caller needs an unreachable
+  model runtime to be a failure rather than an honest report.
+- **Opening approved applications and websites.** Brave, YouTube, YouTube Music,
+  Xbox and Sea of Thieves, from a fixed catalogue. Jarvis chooses *which
+  approved entry*, never which program — and it says an application opened only
+  after it has seen the process running.
+- **Media and volume keys**, and **desktop notifications**.
+- **Jarvis speaks out loud.** Synthesis previously produced audio that nothing
+  ever played. Speech is now audible, can be interrupted mid-sentence, and
+  Jarvis reports how long it actually spoke for.
+- **A one-time wake-word model installation**, `--install-wake-model`, which
+  says exactly where the files go, is safe to repeat, and reports the model as
+  installed only once the detector genuinely starts. The model is never bundled
+  and is licensed for **non-commercial use only**.
+- **The Voice screen's controls now work**: choosing a microphone, testing it
+  with a live level meter, measuring the room, and previewing a voice. The list
+  now names each device's audio system, so the same microphone appearing three
+  times is finally something you can choose between.
+- **A recording indicator.** The tray and the Voice screen both show whenever
+  the microphone is open.
+- **A listening switch.** Turn on "Start listening" and Jarvis waits for
+  "Hey Jarvis", then transcribes what follows and answers it. It says plainly
+  that the wake model is a shared one that has not been tuned to your voice.
+- **Push-to-talk is now optional** and shows its key, so you can turn it off and
+  use the wake phrase instead.
+- **The Voice screen shows what it heard**, with a confidence figure, so a
+  misheard word looks like a mishearing rather than a bad answer.
+- **Your name.** Set it on the Conversation screen and it replaces "You" in the
+  transcript, survives restarts, and is given to the model so Jarvis can address
+  you properly. Leave it empty and nothing changes.
+- **Audio cues.** Short tones for "I heard the wake phrase and I am recording",
+  "I am working on it", and "that is done" — so Jarvis is legible from the tray
+  without its window on screen. Turn them off with `audio.cues_enabled`.
+- **`web.search`.** Searching by words rather than by URL, with Google (the
+  default), DuckDuckGo or YouTube. Jarvis builds the address, so a query with
+  spaces, symbols or a colon in it works. It says outright that it cannot read
+  the results.
+- **Stop speaking**, in the tray menu. It interrupts the sentence and does
+  nothing else: no task is cancelled and no resource lock is released.
+- **`audio.speak_replies`** — `always`, `when_useful` (the default) or `never`.
+
+### Changed
+
+- Deleted conversation history is now genuinely erased from the database file.
+  Previously the rows were unlinked but their contents stayed readable in freed
+  pages.
+- The Home screen reports the voice stack, the secret store and the conversation
+  engine, and no longer describes the build as Phase 0.
+- **Push-to-talk is press-to-start, not hold-to-talk.** Windows reports only the
+  key press for a global hotkey, so holding F9 never worked. Press it, speak,
+  and it stops on its own when you stop talking.
+- In **offline mode** the speech models are pinned to their local cache. Loading
+  a voice or transcription model previously contacted the Hugging Face Hub,
+  which was a network request from a component presented as entirely local.
+- **Speaking to Jarvis no longer drags the window in front of what you were
+  doing.** Speaking is meant to be the way to use Jarvis *without* the window;
+  taking over the screen because someone spoke is the intrusion the non-modal
+  approval panel exists to avoid.
+- **A spoken question is now answered out loud**, and only when the answer is
+  worth hearing. Questions are answered, problems and follow-up questions are
+  always spoken, and an instruction that simply worked — "open Brave" — gets a
+  short cue instead of a sentence about a window you can already see. A *typed*
+  request is never answered aloud, whatever the setting says.
+- **Emoji, formatting and web addresses are no longer read out.** The
+  phonemiser expands every character to its Unicode name, so "Opening Brave 🦁"
+  was spoken as "Opening Brave lion face", and a link was spelled out in full.
+  The written transcript still shows every character; only the spoken copy is
+  stripped, and a code block is announced rather than recited.
+- **"Open YouTube Music" opens the app you installed**, not another browser tab.
+- **Emergency stop now stops Jarvis talking**, from the tray, the Home screen
+  and the hotkey. It cancelled tasks and released locks while continuing to
+  speak over the silence it had just created.
+
+### Fixed
+
+- **Typing a message produced no reply at all.** The Conversation screen sent
+  the message onto a worker that had already been destroyed, so nothing was ever
+  asked of the model — and because nothing failed, nothing was reported.
+- **"Thinking…" silently reverted to "Ready"** part-way through an answer.
+- **Quitting while Jarvis was answering could kill the process outright.**
+- **No button on the Voice screen did anything.** They were enabled and
+  connected to nothing. Push-to-talk reported that the voice stack was
+  unavailable while it was fully installed and working.
+- **Jarvis claimed it had spoken when it had not.** `voice.speak` reported a
+  confirmed success on the strength of having produced audio, while nothing
+  played it. It now fails plainly if no sound reached the output device.
+- **The emergency-stop hotkey never worked.** The key registered and the press
+  was then dropped on its way to the application. It also moved off `Pause`,
+  which many keyboards do not have, to **`Ctrl+Alt+End`**.
+- **Push-to-talk never worked**, for the same reason. F9 was never the problem.
+- **Desktop notifications from tools never appeared**, and the tool reported
+  showing them anyway.
+- **The recording indicator never lit**, so the microphone could open with
+  nothing on screen saying so.
+- **No microphone could be opened at all** on a machine whose default input is
+  an MME device — which is most of them. Jarvis asked every device for settings
+  only one kind of device accepts.
+- **Asking Jarvis to say something failed outright** with an internal error: it
+  reserved a lock by a name that does not exist.
+- **Some questions came back completely blank**, under a confident source
+  label, which is indistinguishable from being ignored. When the model returns
+  nothing, Jarvis now says so — and says what its tools did, if they did
+  anything — rather than rendering the silence as an answer.
+- **Interrupting Jarvis mid-sentence never actually worked.** Three separate
+  causes: the wake threshold during playback demanded a score of 0.96, which is
+  effectively unreachable; the self-echo check compared the microphone's level
+  against the volume of Jarvis's own audio data, which are not the same kind of
+  measurement, and rejected real interruptions almost every time; and emergency
+  stop did not stop speech at all. The Voice screen now also says plainly that
+  speaking over Jarvis cannot interrupt it while the microphone is closed.
+- **Searching the web produced a broken address.** The model was building and
+  encoding search URLs itself; one came back from Google as an error. Jarvis
+  builds them now.
+- **"Open Steam" refused to open Steam**, because the entry insisted on a game
+  to launch. With no game named, it opens the client.
+- **Being asked to open an unapproved application produced invented
+  instructions** pointing at a settings screen that does not exist.
+- **A cue could leave an audio stream open** after the sound had finished, which
+  in the worst case corrupted memory as the process exited.
+
+### Known limitations
+
+- **Wake-word detection is installed but always-listening stays off.** The
+  pretrained "Hey Jarvis" model is measured and working; per-user enrolment is
+  not built, and ADR-0016 does not permit always-listening without it.
+  Single-word "Jarvis" is not detected — measured 0 of 4 attempts.
+- **You cannot interrupt Jarvis by speaking.** Acceptance testing found voice
+  interruption did not work on real hardware even after the thresholds that
+  made it unreachable were repaired, so Jarvis ships in **half duplex**: wake
+  detection pauses while it speaks, and the Voice screen says so rather than
+  claiming otherwise. `Ctrl+Alt+End` and the tray's **Stop speaking** stop it
+  immediately and always. `audio.duplex_mode: full` restores the other
+  behaviour for anyone who wants to measure it.
+- **"Open YouTube Music" still opens a browser tab** rather than the installed
+  web app, despite launching by app id. Under investigation.
+- **Jarvis has no clock.** It can only answer "what time is it?" from the model,
+  which does not know. There is no time tool yet.
+- **Only catalogued applications can be opened.** Naming one that is not in the
+  catalogue is refused, and there is no in-application way to add one.
+- **Jarvis does not speak while it works**, only when it finishes.
+- **"Start at sign-in" appears as `pythonw.exe`** in Windows' startup list.
+  Correct for a source checkout — there is no packaged executable to name until
+  Phase 6.
 
 ---
 

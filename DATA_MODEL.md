@@ -280,6 +280,62 @@ a task's success criteria (PRD FR-048, AT-018).
 
 ---
 
+---
+
+## 3A. Schema versions 2 and 3 — the Phase 1 tables
+
+Migrations are append-only; v1 was not edited (ADR-0002, NFR-043).
+
+**v2 — `phase1_secrets_and_conversation`**
+
+### 3.11 `secret`
+DPAPI ciphertext plus **unencrypted** metadata (ADR-0030). The metadata is not
+sensitive and is what lets the GUI show a user what is stored and delete it;
+keeping it in the clear beside the ciphertext is what avoids a home-grown
+envelope scheme. `name` is the primary key and is also mixed into the DPAPI
+entropy, so ciphertext lifted from this table cannot be unprotected under a
+different name. Excluded from normal exports (FR-169, AT-016).
+
+### 3.12 `conversation`
+One row per **persisted** conversation. A private session (FR-046, AT-014)
+never writes a row here at all — it is not written and then removed, which is
+what makes AT-014 structural rather than dependent on a cleanup step.
+
+### 3.13 `message`
+One turn, cascading from `conversation`. `source_label` is the FR-047 grounding
+label: model answer, retrieved fact, inference, tool result, or uncertainty.
+
+### 3.14 `personality_profile`
+The active profile (FR-043). User-editable; never changed by observation.
+
+### 3.15 `personality_proposal`
+A suggested adjustment awaiting a decision (FR-044). Nothing here affects
+behaviour until its status becomes `accepted`, which only the user can cause
+(PRD §4.4, no silent learning).
+
+**v3 — `phase1_wake_enrolment`**
+
+### 3.16 `wake_enrolment`
+One row per enrolment attempt, holding the **measurement** that decided whether
+always-listening could be enabled. ADR-0016 criterion 1 is explicit that "we
+trained a model" without a measurement does not count, so the rates are stored,
+not just the verdict.
+
+### 3.17 `wake_enrolment_sample`
+Paths to the user's recordings, which are personal data (ADR-0016 criterion 3):
+stored under the vault, listed in the Voice screen, deletable, and excluded from
+normal exports. The audio itself is on disk; only its path is recorded here.
+
+### Deletion is real, not logical
+
+`PRAGMA secure_delete` is enabled on every connection. Without it SQLite unlinks
+a row but leaves its bytes in free pages, so deleted conversation history stayed
+readable in `jarvis.db`. "Deleted" has to mean gone (FR-045, FR-167, AT-013,
+AT-014), and `tests/acceptance/test_at014_private_session.py` asserts it by
+reading the vault back as bytes.
+
+---
+
 ## 4. Entity relationships
 
 ```mermaid
@@ -341,7 +397,7 @@ table before anything writes to it would be speculative schema.
 
 | Entity group | Phase | Notes |
 |--------------|-------|-------|
-| Conversation, message, personality profile | 1 | history controls and private session (FR-045, FR-046) |
+| ~~Conversation, message, personality profile~~ | 1 | **Built in schema v2** — see §3.11–3.15 |
 | Model profile, voice profile, token usage | 1 | role-based model routing (FR-041) |
 | Application, application alias | 2 | the application catalogue (FR-060) |
 | Window layout, monitor profile, workspace profile and version | 3 | FR-240 … FR-249, FR-280 … FR-289 |

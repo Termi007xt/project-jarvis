@@ -262,44 +262,52 @@ automation beyond opening an approved application or URL.
 
 ### 4.2 Exit criteria (PRD §21, verbatim)
 
-- [ ] "Jarvis" or configured fallback reliably starts a command in the test
-      environment
-- [ ] User can converse locally
-- [ ] User can open Brave, YouTube, YouTube Music, Xbox, and Sea of Thieves
-- [ ] User can stop listening and stop all automation
-- [ ] No network is used in offline mode
+**All five met, confirmed by user acceptance testing on 2026-08-04.**
+
+- [x] "Jarvis" or configured fallback reliably starts a command in the test
+      environment — the configured fallback **"Hey Jarvis"**, on the pretrained
+      openWakeWord model. Bare "Jarvis" is not detected (0 of 4 measured) and is
+      stated as such in the GUI. No false wakes over an extended period of
+      normal conversation.
+- [x] User can converse locally
+- [x] User can open Brave, YouTube, YouTube Music, Xbox, and Sea of Thieves
+      — YouTube Music opens as a browser tab rather than the installed web app;
+      the criterion is that it opens, and it does. The app-id route is recorded
+      as an open defect.
+- [x] User can stop listening and stop all automation
+- [x] No network is used in offline mode
 
 ### 4.3 Work items
 
 | ID | Item | PRD refs | Depends on | Size | Status |
 |----|------|----------|------------|------|--------|
-| P1-AUD-01 | Wake-word detection (openWakeWord), configurable phrase, push-to-talk fallback | FR-010, FR-011, FR-018 | P0-COR-06 | L | Not started |
-| P1-AUD-02 | Privacy-preserving in-memory ring buffer, visible/audible recording indicators | FR-012, FR-013, AT-002 | P1-AUD-01 | M | Not started |
-| P1-AUD-03 | Voice activity detection for command bounds; barge-in pause while speaking | FR-014, FR-015 | P1-AUD-01 | M | Not started |
-| P1-AUD-04 | Microphone selection with test meter; ambient-noise calibration | FR-016, FR-017 | P1-AUD-01 | S | Not started |
-| P1-AUD-05 | Local STT integration (faster-whisper), model selection, English-only mode | FR-020, FR-021, FR-022, FR-039A | P1-AUD-03 | L | Not started |
-| P1-AUD-06 | Transcript confirmation for low-confidence commands; wake-word stripping; no raw-audio retention by default | FR-023, FR-024, FR-025 | P1-AUD-05 | M | Not started |
-| P1-AUD-07 | Local TTS integration (Kokoro), voice selection, preview, rate/pitch/volume | FR-030, FR-031 | P0-COR-06 | L | Not started |
-| P1-AUD-08 | Voice licence metadata; provider-neutral `TtsProvider` interface | FR-032, FR-035 | P1-AUD-07 | S | Not started |
-| P1-AUD-09 | Progress speech without repeated interruption; sensitive-output filtering; stable voice identity | FR-033, FR-034, FR-036 | P1-AUD-07 | M | Not started |
-| P1-AUD-10 | Expressive TTS worker isolation prototype (Qwen3-TTS, Python 3.12, typed authenticated IPC), disabled by default | FR-037, FR-038 | P1-AUD-08 | XL | Not started |
-| P1-LLM-01 | Ollama conversational-model integration; structured tool-call output only | FR-040, §13.4 | P0-LLM-01 | L | Not started |
-| P1-LLM-02 | Model routing skeleton: separate profiles for conversation/vision/embedding/STT/TTS roles | FR-041 | P1-LLM-01 | M | Not started |
-| P1-LLM-03 | Bounded multi-turn conversation context | FR-042 | P1-LLM-01 | M | Not started |
-| P1-COR-01 | Hallucination-source labelling: model answer / retrieved fact / inference / tool result / uncertainty | FR-047 | P1-LLM-01 | M | Not started |
-| P1-COR-02 | Tool-grounded success enforcement in conversational responses | FR-048 | P1-COR-01, P0-COR-04 | M | Not started |
-| P1-COR-03 | Startup-at-sign-in setting | FR-002 | P0-CFG-01 | S | Not started |
-| P1-MEM-01 | Personality profile editor; humour-learning proposal flow (approval-gated) | FR-043, FR-044 | P1-LLM-01 | M | Not started |
-| P1-MEM-02 | Local conversation history storage; global and per-conversation disable | FR-045 | P1-LLM-01, P0-CFG-03 | M | Not started |
-| P1-MEM-03 | Private session mode: no permanent history or memory | FR-046, AT-014 | P1-MEM-02 | M | Not started |
-| P1-APP-01 | Application launcher: registry seed, `open_application`/`close_application`, launch verification | FR-060 (partial), FR-062 (partial), FR-063, FR-064, AT-003 | P0-COR-04 | L | Not started |
-| P1-BRW-01 | Basic Brave URL opening (`open_url`), no dedicated profile yet | §21 (Phase 1 deliverable) | P1-APP-01 | S | Not started |
-| P1-WIN-01 | Media controls (play/pause/next/previous/stop/mute/volume) via Windows media APIs | FR-094 | P0-COR-04 | M | Not started |
-| P1-SEC-01 | Approval dialog UI wired to `ApprovalPort`, replacing `DenyingApprovalPort` for the interactive path | §11.2 | P0-COR-04, P0-UI-01 | L | Not started |
-| P1-SEC-02 | Secret store (DPAPI-backed) for the first stored secrets | NFR-022 | P0-CFG-02 | M | Not started |
-| P1-UI-01 | Conversation screen and Home screen live data | §9.4, §9.5 | P1-LLM-01, P1-MEM-02 | M | Not started |
-| P1-UI-02 | Global hotkey infrastructure; configurable emergency-stop hotkey wired to `JarvisCore` | §11.3 | P0-COR-08, P0-UI-01 | M | Not started |
-| P1-UI-03 | Windows toast notifications; spoken-notification configuration by event type | FR-180, FR-181 | P0-UI-01, P1-AUD-07 | M | Not started |
+| P1-AUD-01 | Wake-word detection (openWakeWord), configurable phrase, push-to-talk fallback | FR-010, FR-011, FR-018 | P0-COR-06 | L | **Done** — base model installed via `--install-wake-model`, never bundled; per-user enrolment deferred (ADR-0016) |
+| P1-AUD-02 | Privacy-preserving in-memory ring buffer, visible/audible recording indicators | FR-012, FR-013, AT-002 | P1-AUD-01 | M | **Done** |
+| P1-AUD-03 | Voice activity detection for command bounds; barge-in pause while speaking | FR-014, FR-015 | P1-AUD-01 | M | **Done** — shipping half duplex, which is the FR-015 wording; see the ADR-0028 amendment of 2026-08-04 |
+| P1-AUD-04 | Microphone selection with test meter; ambient-noise calibration | FR-016, FR-017 | P1-AUD-01 | S | **Done** — wired to the service in the GUI-seam round; devices name their audio system |
+| P1-AUD-05 | Local STT integration (faster-whisper), model selection, English-only mode | FR-020, FR-021, FR-022, FR-039A | P1-AUD-03 | L | **Done** |
+| P1-AUD-06 | Transcript confirmation for low-confidence commands; wake-word stripping; no raw-audio retention by default | FR-023, FR-024, FR-025 | P1-AUD-05 | M | **Done** |
+| P1-AUD-07 | Local TTS integration (Kokoro), voice selection, preview, rate/pitch/volume | FR-030, FR-031 | P0-COR-06 | L | **Done** |
+| P1-AUD-08 | Voice licence metadata; provider-neutral `TtsProvider` interface | FR-032, FR-035 | P1-AUD-07 | S | **Done** |
+| P1-AUD-09 | Progress speech without repeated interruption; sensitive-output filtering; stable voice identity | FR-033, FR-034, FR-036 | P1-AUD-07 | M | Partial — filtering and stable voice identity done, plus presentation stripping before synthesis; **progress speech not built** and carried to Phase 2 |
+| P1-AUD-10 | Expressive TTS worker isolation prototype (Qwen3-TTS, Python 3.12, typed authenticated IPC), disabled by default | FR-037, FR-038 | P1-AUD-08 | XL | Deferred out of Phase 1 (multiprocessing denied; needs its own ADR) |
+| P1-LLM-01 | Ollama conversational-model integration; structured tool-call output only | FR-040, §13.4 | P0-LLM-01 | L | **Done** |
+| P1-LLM-02 | Model routing skeleton: separate profiles for conversation/vision/embedding/STT/TTS roles | FR-041 | P1-LLM-01 | M | **Done** |
+| P1-LLM-03 | Bounded multi-turn conversation context | FR-042 | P1-LLM-01 | M | **Done** |
+| P1-COR-01 | Hallucination-source labelling: model answer / retrieved fact / inference / tool result / uncertainty | FR-047 | P1-LLM-01 | M | **Done** |
+| P1-COR-02 | Tool-grounded success enforcement in conversational responses | FR-048 | P1-COR-01, P0-COR-04 | M | **Done** |
+| P1-COR-03 | Startup-at-sign-in setting | FR-002 | P0-CFG-01 | S | **Done** |
+| P1-MEM-01 | Personality profile editor; humour-learning proposal flow (approval-gated) | FR-043, FR-044 | P1-LLM-01 | M | **Done** |
+| P1-MEM-02 | Local conversation history storage; global and per-conversation disable | FR-045 | P1-LLM-01, P0-CFG-03 | M | **Done** |
+| P1-MEM-03 | Private session mode: no permanent history or memory | FR-046, AT-014 | P1-MEM-02 | M | **Done** |
+| P1-APP-01 | Application launcher: registry seed, `open_application`/`close_application`, launch verification | FR-060 (partial), FR-062 (partial), FR-063, FR-064, AT-003 | P0-COR-04 | L | **Done** — ADR-0029 accepted; `close_application` is high risk and deferred to Phase 2 |
+| P1-BRW-01 | Basic Brave URL opening (`open_url`), no dedicated profile yet | §21 (Phase 1 deliverable) | P1-APP-01 | S | **Done** — plus `web.search`, added after the model produced malformed URLs |
+| P1-WIN-01 | Media controls (play/pause/next/previous/stop/mute/volume) via Windows media APIs | FR-094 | P0-COR-04 | M | **Done** |
+| P1-SEC-01 | Approval dialog UI wired to `ApprovalPort`, replacing `DenyingApprovalPort` for the interactive path | §11.2 | P0-COR-04, P0-UI-01 | L | **Done** |
+| P1-SEC-02 | Secret store (DPAPI-backed) for the first stored secrets | NFR-022 | P0-CFG-02 | M | **Done** |
+| P1-UI-01 | Conversation screen and Home screen live data | §9.4, §9.5 | P1-LLM-01, P1-MEM-02 | M | **Done** |
+| P1-UI-02 | Global hotkey infrastructure; configurable emergency-stop hotkey wired to `JarvisCore` | §11.3 | P0-COR-08, P0-UI-01 | M | **Done** |
+| P1-UI-03 | Windows toast notifications; spoken-notification configuration by event type | FR-180, FR-181 | P0-UI-01, P1-AUD-07 | M | **Done** — notifications ship; spoken-notification configuration by event type is not built (FR-181 carried to Phase 2) |
 
 ### 4.4 Tests to add in this phase
 
@@ -339,6 +347,22 @@ automation beyond opening an approved application or URL.
   ("Phase 1 may pause wake detection while Jarvis is speaking"); the full
   "Jarvis stop" interrupt phrase or global hotkey is not required to be
   reliable until later.
+
+### 4.6 Carried into Phase 2 (closed 2026-08-04)
+
+Phase 1 met all five exit criteria. These are the open items it did **not**
+close, recorded here rather than left in a session transcript:
+
+| Item | Origin | Note |
+|---|---|---|
+| Voice interruption does not work on real hardware | Acceptance 8.3 | Shipped as `duplex_mode: half`, which FR-015 permits and the GUI states. `Ctrl+Alt+End` and tray **Stop speaking** work. Needs a measurement, not a rewrite |
+| "Open YouTube Music" opens a tab, not the installed app | Acceptance 5 | The app-id vector is correct and tested; the `chrome_proxy.exe` route did not take effect on this machine. Likely the profile directory or the app id |
+| No time or date capability | Acceptance 3 | The most obvious question to ask a voice assistant, and it can only be answered from the model, which cannot know. A small verifiable tool |
+| Arbitrary application launching with first-use permission | Owner request, 2026-08-04 | Deferred for stability. Needs its own ADR: Start-menu discovery as the executable source, approval on first use, persisted entries, a `.lnk` parser that runs nothing. ADR-0029 constraint 3 is preserved by construction |
+| Progress speech during long work (FR-033) | P1-AUD-09 | Not built. Matters once Phase 2 has work long enough to report progress on |
+| Spoken notifications by event type (FR-181) | P1-UI-03 | Notifications ship; choosing which are spoken does not |
+| Per-user wake enrolment (ADR-0016 Path 1) | P1-AUD-01 | Measurement types, threshold fitting and the quality bar exist and are tested; the recording flow and personal verifier do not |
+| Startup entry is named `pythonw.exe` | Acceptance 10 | Correct behaviour for a source checkout — there is no executable to name yet. Phase 6 packaging (ADR-0013, ADR-0022) resolves it |
 
 ---
 

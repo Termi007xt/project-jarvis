@@ -102,6 +102,14 @@ class WakeWordConfig(_Base):
     provider: str
     phrase: str
     push_to_talk_enabled: bool = True
+    #: PRD FR-018 and ADR-0027 specify bare F9. It is configurable because a
+    #: global hook swallows the key from every other application, and F9 is
+    #: heavily used by IDEs, spreadsheets and games.
+    push_to_talk_hotkey: str = "F9"
+    #: ADR-0016: always-listening stays off until enrolment has been measured
+    #: and passed. Push-to-talk is the fallback until then.
+    always_listening: bool = False
+    enrolled: bool = False
 
 
 class SpeechToTextConfig(_Base):
@@ -192,6 +200,21 @@ class AudioConfig(_Base):
     text_to_speech: TextToSpeechConfig
     pronunciation: PronunciationConfig
     language: LanguageConfig
+    #: Short tones marking "I heard the wake phrase" and "I am working on it".
+    #: They are how a tray application stays legible without its window, so
+    #: they are on by default — but they are also the kind of thing that grates,
+    #: so they can be turned off.
+    cues_enabled: bool = True
+    #: When a *spoken* request gets a spoken answer. A typed request is never
+    #: answered aloud whatever this says — you are already at the screen.
+    #: "when_useful" answers questions and reports problems, and marks a
+    #: finished instruction with a cue instead of narrating it.
+    speak_replies: Literal["always", "when_useful", "never"] = "when_useful"
+    #: "half" pauses wake detection while Jarvis speaks, so it cannot be
+    #: interrupted by voice — which FR-015 explicitly permits for Phase 1, and
+    #: which user acceptance on 2026-08-04 showed to be the truth on this
+    #: hardware. `Ctrl+Alt+End` and the tray's Stop speaking are unaffected.
+    duplex_mode: Literal["half", "full"] = "half"
 
 
 class DefaultPermissionPolicy(_Base):
@@ -223,7 +246,19 @@ class LoggingConfig(_Base):
 class UiConfig(_Base):
     start_minimised_to_tray: bool = True
     show_unavailable_features: bool = True
-    emergency_stop_hotkey: str = "Ctrl+Alt+Pause"
+    #: Not Pause: many compact and tenkeyless keyboards have no Pause key at
+    #: all, which makes the panic button unreachable on the hardware most
+    #: likely to need it. End is present on every layout.
+    emergency_stop_hotkey: str = "Ctrl+Alt+End"
+    #: What to call the user. Shown instead of "You" in the transcript, and told
+    #: to the model so it can address them. Empty means "You" and no claim about
+    #: who is speaking. Stays on this machine like everything else.
+    user_name: str = ""
+    #: PRD FR-002. Registered per-user, so it never needs elevation (ADR-0009).
+    start_at_sign_in: bool = False
+    #: An unanswered approval is denied after this long (ADR-0027). Bounded by
+    #: PRD NFR-013: there is no "wait forever" option.
+    approval_timeout_seconds: Annotated[float, Field(gt=0, le=900)] = 120.0
 
 
 class StorageConfig(_Base):

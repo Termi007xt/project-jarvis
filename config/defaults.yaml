@@ -46,10 +46,38 @@ model_runtime:
   allow_parallel_heavy_models: false
 
 audio:
+  # Short tones for "wake phrase heard" and "working on it", so Jarvis is
+  # legible from the tray without its window open.
+  cues_enabled: true
+
+  # always      - say every reply to a spoken request out loud
+  # when_useful - answer questions and report problems aloud; mark a finished
+  #               instruction ("open Brave") with a cue instead of narrating it
+  # never       - never speak a reply; the Conversation screen still has it
+  # A typed request is never answered aloud, whatever this says.
+  speak_replies: when_useful
+
+  # half - wake detection pauses while Jarvis speaks, so it cannot be
+  #        interrupted by voice. FR-015 permits this for Phase 1, and user
+  #        acceptance on 2026-08-04 found voice interruption did not work on
+  #        this hardware, so claiming otherwise would be false (ADR-0028).
+  # full  - the microphone stays live while speaking; needs the self-trigger
+  #         rate measured before it can be relied upon.
+  # Ctrl+Alt+End and the tray's "Stop speaking" work in either mode.
+  duplex_mode: half
+
   wake_word:
     provider: openwakeword
+    # ADR-0016 Path 1 layers a personal verifier on a pretrained base model, and
+    # openWakeWord ships one for "Hey Jarvis" but not for bare "Jarvis". The GUI
+    # must show the enrolled phrase truthfully and must never imply this model
+    # detects "Jarvis" alone (FR-011).
     phrase: "Hey Jarvis"
     push_to_talk_enabled: true
+    push_to_talk_hotkey: "F9"
+    # Stays false until enrolment has been measured and passed (ADR-0016).
+    always_listening: false
+    enrolled: false
 
   speech_to_text:
     provider: faster_whisper
@@ -142,7 +170,13 @@ logging:
 ui:
   start_minimised_to_tray: true
   show_unavailable_features: true
-  emergency_stop_hotkey: "Ctrl+Alt+Pause"
+  # Not Pause: many compact and tenkeyless keyboards have no Pause key, which
+  # leaves the panic button unreachable. End exists on every layout.
+  emergency_stop_hotkey: "Ctrl+Alt+End"
+  start_at_sign_in: false
+  # What to call you. Set it on the Conversation screen; empty means "You".
+  user_name: ""
+  approval_timeout_seconds: 120.0
 
 storage:
   huggingface_home: "%LOCALAPPDATA%\\ProjectJarvis\\models\\huggingface"

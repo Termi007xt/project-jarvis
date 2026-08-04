@@ -35,15 +35,18 @@ class JarvisTrayIcon(QObject):
     settingsRequested = Signal()
     quitRequested = Signal()
     emergencyStopRequested = Signal()
+    stopSpeakingRequested = Signal()
     pauseRequested = Signal()
     resumeRequested = Signal()
     cancelRequested = Signal()
+    reviewApprovalRequested = Signal()
     offlineModeToggled = Signal(bool)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._state = TrayState.IDLE
         self._current_task_id: str | None = None
+        self._pending_approvals = 0
 
         self._icon = QSystemTrayIcon(tray_icon(TrayState.IDLE), self)
         self._menu = QMenu()
@@ -55,6 +58,14 @@ class JarvisTrayIcon(QObject):
     # -- construction ------------------------------------------------------
     def _build_menu(self) -> None:
         self.action_open = self._add(self._menu, "&Open Jarvis", self.openRequested.emit)
+
+        # A non-modal approval surface must be reachable without a mouse
+        # (PRD NFR-030, ADR-0027). This entry is that route.
+        self.action_review_approval = self._add(
+            self._menu, "&Review pending approval", self.reviewApprovalRequested.emit
+        )
+        self.action_review_approval.setEnabled(False)
+        self.action_review_approval.setToolTip("No approval is waiting.")
         self._menu.addSeparator()
 
         self.action_listening = self._add(self._menu, "Listening", None, key="listening")
@@ -82,6 +93,17 @@ class JarvisTrayIcon(QObject):
         self.action_emergency_stop.setToolTip(
             "Cancel every running task, release every resource lock and stop all "
             "automation workers. Jarvis keeps running."
+        )
+
+        # Separate from emergency stop on purpose (ADR-0028): interrupting
+        # speech must not release locks or cancel work, or "stop talking"
+        # becomes quietly destructive.
+        self.action_stop_speaking = self._add(
+            self._menu, "&Stop speaking", self.stopSpeakingRequested.emit
+        )
+        self.action_stop_speaking.setToolTip(
+            "Interrupt Jarvis mid-sentence. Nothing else stops: no task is "
+            "cancelled and no resource lock is released."
         )
         self._menu.addSeparator()
 
@@ -132,6 +154,25 @@ class JarvisTrayIcon(QObject):
     @property
     def state(self) -> TrayState:
         return self._state
+
+    def set_pending_approvals(self, count: int) -> None:
+        """Enable the keyboard route and say how many are waiting."""
+        self._pending_approvals = count
+        self.action_review_approval.setEnabled(count > 0)
+        if count > 0:
+            self.action_review_approval.setText(
+                f"&Review pending approval ({count})" if count > 1 else "&Review pending approval"
+            )
+            self.action_review_approval.setToolTip(
+                "Jarvis is waiting for your decision. Unanswered requests are denied."
+            )
+        else:
+            self.action_review_approval.setText("&Review pending approval")
+            self.action_review_approval.setToolTip("No approval is waiting.")
+
+    @property
+    def pending_approvals(self) -> int:
+        return self._pending_approvals
 
     def set_network_mode(self, mode: NetworkMode) -> None:
         blocked = self.action_offline.blockSignals(True)

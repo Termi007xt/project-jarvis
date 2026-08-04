@@ -138,14 +138,26 @@ def test_exit_4_audit_events_are_written_to_disk_and_indexed(core: JarvisCore) -
     assert wait_for(lambda: core.tasks.require(task_id).is_terminal)
 
     assert core.paths.audit_log_path.is_file()
+
+    # The SQLite index is read *first*, and the JSONL record of truth second.
+    # Each event is appended to JSONL before it is indexed, so in that order
+    # the index can only ever be a subset — whereas comparing counts the other
+    # way round races the health worker, which keeps writing while the test
+    # reads. The subset relation is the real invariant; equal counts were only
+    # ever an accident of timing.
+    indexed = {
+        str(row["audit_id"])
+        for row in core.database.query_all("SELECT audit_id FROM audit_event")
+    }
     records = core.audit.read_all()
     assert len(records) > 0
+    assert indexed, "the SQLite search index must be populated"
 
     categories = {record["category"] for record in records}
     assert {"lifecycle", "permission", "tool", "task"} <= categories
 
-    indexed = core.database.query_all("SELECT COUNT(*) AS n FROM audit_event")
-    assert indexed[0]["n"] == len(records)
+    on_disk = {str(record["audit_id"]) for record in records}
+    assert indexed <= on_disk, "every indexed event must exist in the record of truth"
 
 
 def test_exit_4_every_audit_record_carries_the_prd_11_5_fields(core: JarvisCore) -> None:
@@ -216,13 +228,45 @@ def test_exit_6_no_prohibited_tool_can_be_registered(core) -> None:
         assert not check_tool_id(name)
 
 
-def test_exit_6_the_registered_tool_set_is_narrow_and_read_only(core: JarvisCore) -> None:
-    """Phase 0 registers exactly one tool, and it changes nothing."""
+def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
+    """The tool set stays small and low risk.
+
+    Phase 0 registered exactly one tool. Phase 1 adds the five PRD section 21
+    names plus ``notify.show``, which only a shell can back. The invariant that
+    still has to hold is not the count but the shape: everything registered is
+    **low risk**, and nothing has appeared that no phase asked for.
+    """
     specs = core.registry.specs()
-    assert [spec.tool_id for spec in specs] == ["system.health"]
+    registered = {spec.tool_id for spec in specs}
+
+    expected = {
+        "system.health",      # Phase 0
+        "app.open",           # Phase 1, PRD section 21
+        "web.open_url",
+        # Added after acceptance testing: asked to search, the model built its
+        # own URL and produced a malformed one that Google answered with 400.
+        # A narrow tool that takes words and does the encoding removes the
+        # whole class of error. It widens nothing — same capability, same
+        # browser, same scheme restriction as web.open_url.
+        "web.search",
+        "media.control",
+        "device.volume",
+        "voice.speak",
+    }
+    assert registered == expected, (
+        "the registered tool set has drifted from what the phases declare"
+    )
     for spec in specs:
-        assert spec.changes_state is False
-        assert spec.risk is RiskLevel.LOW
+        assert spec.risk is RiskLevel.LOW, f"{spec.tool_id} is not low risk"
+
+
+def test_exit_6_a_state_changing_tool_must_declare_how_it_verifies(
+    core: JarvisCore,
+) -> None:
+    """PRD FR-048: succeeded requires verification, so it must be declared."""
+    for spec in core.registry.specs():
+        if spec.changes_state:
+            assert spec.verification, f"{spec.tool_id} changes state but declares no check"
 
 
 def test_exit_6_the_planner_is_offered_only_registered_tools(core: JarvisCore) -> None:
@@ -254,12 +298,20 @@ def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
 
 
 def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> None:
-    """Screenshot-based computer control is out of scope for Phase 0."""
+    """Screenshot-based computer control is still out of scope.
+
+    Phase 1 legitimately adds ``jarvis.audio``, so the "no audio package"
+    assertion this test carried through Phase 0 has been replaced by the
+    constraint it was really protecting: no heavy or computer-control library
+    may be imported at module scope. That keeps the engine importable on Linux
+    with no audio stack installed, which is what makes the CI matrix meaningful
+    (ARCHITECTURE section 11). See ``tests/security/test_lazy_audio_imports.py``
+    for the Phase 1 statement of the same rule.
+    """
     package = repo_root / "src" / "jarvis"
     assert not (package / "automation").exists(), "automation lands in Phase 2"
-    assert not (package / "audio").exists(), "audio lands in Phase 1"
 
-    banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2", "sounddevice"}
+    banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
     for path in package.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -419,6 +471,49 @@ def test_the_cli_check_command_reports_status(vault) -> None:
         ["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"]
     )
     assert exit_code == 0
+
+
+def test_check_stays_successful_when_the_model_runtime_is_unreachable(
+    vault, monkeypatch
+) -> None:
+    """An honest report of an unreachable runtime is a successful self-check.
+
+    Settled 2026-08-02 (PROJECT_STATE decision 7): --check keeps exit 0, and
+    callers needing the stronger statement pass --require-healthy.
+    """
+    from jarvis.main import main
+
+    monkeypatch.setenv("JARVIS__LLM__OLLAMA__BASE_URL", "http://127.0.0.1:1")
+    assert main(["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"]) == 0
+
+
+def test_require_healthy_makes_an_unreachable_runtime_a_failure(
+    vault, monkeypatch, capsys
+) -> None:
+    from jarvis.main import main
+
+    monkeypatch.setenv("JARVIS__LLM__OLLAMA__BASE_URL", "http://127.0.0.1:1")
+    exit_code = main(
+        [
+            "--check",
+            "--require-healthy",
+            "--data-dir",
+            str(vault.root),
+            "--allow-multiple-instances",
+        ]
+    )
+    assert exit_code == 1
+    assert "--require-healthy" in capsys.readouterr().err
+
+
+def test_check_reports_the_voice_stack_and_secret_store(vault, capsys) -> None:
+    """Phase 1 state must be visible from the headless self-check."""
+    from jarvis.main import main
+
+    main(["--check", "--data-dir", str(vault.root), "--allow-multiple-instances"])
+    output = capsys.readouterr().out
+    assert "voice stack" in output
+    assert "secret store" in output
 
 
 def test_offline_mode_is_reachable_from_configuration(core: JarvisCore) -> None:

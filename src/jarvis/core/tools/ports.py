@@ -11,17 +11,72 @@ from typing import Any, Protocol, Sequence, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jarvis.core.permissions.models import Decision, GrantScope, RiskLevel
+from jarvis.common import new_id
+from jarvis.core.permissions.models import Capability, Decision, GrantScope, RiskLevel
 
 __all__ = [
     "LockPort",
     "LockLease",
+    "RememberDenialOption",
     "ApprovalRequest",
     "ApprovalOutcome",
     "ApprovalPort",
     "DenyingApprovalPort",
     "AutoApprovalPort",
+    "offerable_scopes_for",
+    "denial_options_for",
 ]
+
+#: How a capability's ``scope_kind`` maps to a rememberable denial (ADR-0027).
+#: ``url_host`` reuses ``APPLICATION``, which matches on an exact ``scope_ref``,
+#: and is labelled "this site" so the button never overstates what it covers.
+_DENIAL_SCOPES: dict[str, tuple[GrantScope, str]] = {
+    "application": (GrantScope.APPLICATION, "this application"),
+    "folder": (GrantScope.FOLDER, "this folder"),
+    "url_host": (GrantScope.APPLICATION, "this site"),
+}
+
+
+def offerable_scopes_for(
+    risk: RiskLevel, *, allow_always_for_low_risk: bool = True
+) -> tuple[GrantScope, ...]:
+    """The allow-scopes the dialog may offer, per the ADR-0027 table.
+
+    Low offers "always", medium offers "for this task", high offers single use
+    and nothing else. ``SESSION`` is deliberately absent: the engine still
+    supports it programmatically, but its lifetime is invisible to a user, and
+    "this task" already covers approving a multi-step operation once.
+    """
+    if risk is RiskLevel.HIGH:
+        # PRD 9.9 and 11.1: fresh confirmation every time. Not a UX choice.
+        return (GrantScope.ONCE,)
+    if risk is RiskLevel.MEDIUM:
+        return (GrantScope.ONCE, GrantScope.TASK)
+    if risk is RiskLevel.LOW:
+        return (GrantScope.ONCE, GrantScope.ALWAYS) if allow_always_for_low_risk else (GrantScope.ONCE,)
+    return ()  # PROHIBITED never reaches a dialog at all.
+
+
+def denial_options_for(
+    capability: Capability | None, target: str | None
+) -> tuple["RememberDenialOption", ...]:
+    """"Don't ask again" options, when the capability has a meaningful target.
+
+    A remembered denial is a ``DENY`` grant. Deny-grants already outrank
+    allow-grants and short-circuit the high-risk ASK path, so no engine change
+    is needed to make a refusal stick (ADR-0027).
+    """
+    if capability is None or not target or capability.scope_kind is None:
+        return ()
+    mapped = _DENIAL_SCOPES.get(capability.scope_kind)
+    if mapped is None:
+        return ()
+    scope, noun = mapped
+    return (
+        RememberDenialOption(
+            scope=scope, scope_ref=target, label=f"Don't ask again for {noun}"
+        ),
+    )
 
 
 @runtime_checkable
@@ -45,12 +100,24 @@ class LockPort(Protocol):
         """Return a lease, or ``None`` if the whole set could not be taken."""
 
 
+class RememberDenialOption(BaseModel):
+    """A "don't ask again" choice offered alongside Deny (ADR-0027)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    scope: GrantScope
+    scope_ref: str
+    label: str
+
+
 class ApprovalRequest(BaseModel):
     """What the user is shown before a consequential action (PRD section 11.2)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    approval_id: str = Field(default_factory=new_id)
     capability_id: str
+    capability_title: str = ""
     risk: RiskLevel
     tool_id: str
     action_summary: str = Field(description="The requested action, in plain language.")
@@ -70,6 +137,10 @@ class ApprovalRequest(BaseModel):
         default=(GrantScope.ONCE,),
         description="Scopes the dialog may offer. High risk offers ONCE only.",
     )
+    denial_options: tuple[RememberDenialOption, ...] = Field(
+        default=(),
+        description="Rememberable denials, when the capability has a real target.",
+    )
 
 
 class ApprovalOutcome(BaseModel):
@@ -81,6 +152,14 @@ class ApprovalOutcome(BaseModel):
     scope: GrantScope = GrantScope.ONCE
     stop_task: bool = False
     reason: str = ""
+    remember_denial: RememberDenialOption | None = Field(
+        default=None,
+        description="Set only alongside DENY, to persist a scoped deny-grant.",
+    )
+    timed_out: bool = Field(
+        default=False,
+        description="The request expired unanswered. Recorded as denied, never allowed.",
+    )
 
     @property
     def allowed(self) -> bool:

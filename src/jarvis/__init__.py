@@ -13,7 +13,7 @@ __all__ = ["APP_NAME", "APP_CODENAME", "APP_VERSION", "VAULT_DIR_NAME"]
 
 APP_CODENAME = "Jarvis"
 APP_NAME = "Project Jarvis"
-APP_VERSION = "0.1.0.dev0"
+APP_VERSION = "0.2.0.dev0"
 
 #: Directory name used under %LOCALAPPDATA% for the data vault (PRD section 14.2).
 VAULT_DIR_NAME = "ProjectJarvis"
