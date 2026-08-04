@@ -101,6 +101,17 @@ class ArgumentKind(str, Enum):
     NONE = "none"
     URL = "url"
     STEAM_APP_ID = "steam_app_id"
+    #: An ephemeral CDP port for browser automation (ADR-0031). The catalogue
+    #: entry fixes that the entry accepts *a port*; the engine picks the number
+    #: and the model never sees or supplies it, so constraint 3 is untouched —
+    #: the model still names an entry, never a binary and never a port.
+    DEBUG_PORT = "debug_port"
+
+
+#: Ports the OS hands out for ephemeral use. A debugging port must be one of
+#: these and never a well-known number: a fixed port would be a predictable,
+#: standing control channel on the user's browser (ADR-0031).
+EPHEMERAL_PORT_RANGE = (1024, 65535)
 
 
 @dataclass(frozen=True)
@@ -232,6 +243,17 @@ def _validate_argument(entry: ApplicationEntry, argument: str | None) -> list[st
         if not argument.isdigit():
             raise CatalogueError(f"'{argument}' is not a Steam app id")
         return [argument]
+
+    if entry.argument_kind is ArgumentKind.DEBUG_PORT:
+        low, high = EPHEMERAL_PORT_RANGE
+        if not argument.isdigit() or not (low <= int(argument) <= high):
+            raise CatalogueError(
+                f"'{argument}' is not a usable debugging port. It must be a "
+                f"number between {low} and {high}, chosen per session — a fixed "
+                "port would leave a predictable control channel open on the "
+                "browser (ADR-0031)."
+            )
+        return [f"--remote-debugging-port={argument}"]
 
     raise CatalogueError(f"unhandled argument kind {entry.argument_kind}")  # pragma: no cover
 
