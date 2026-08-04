@@ -392,6 +392,31 @@ verifies against a condition it does not control is not verifying.** The rule th
 adds: a verification target must be able to distinguish "my effect happened" from
 "something unrelated was already true."
 
+#### Defect 4, found by accepting stage 0 — the likeliest original cause
+
+The owner reported on 2026-08-04 that **YouTube Music now opens correctly as an
+app.** Nothing in the stage 0 fix could have caused that: the verification change
+altered only what Jarvis *reports*, never what it launches.
+
+What did change is that the CDP spikes left **Brave closed**. That gives a fourth
+and better hypothesis than any of the original three:
+
+> With no Brave instance running, `chrome_proxy.exe --profile-directory=Default
+> --app-id=<id>` starts the browser fresh and it honours the app id. With Brave
+> already running, the second process hands its command line to the existing
+> instance, and that instance opens a **tab** rather than an app window.
+
+If that holds it explains the whole defect, and it generalises: **an entry whose
+launch is handed off to a running instance may not do what its argument vector
+says.** Two consequences for Phase 2:
+
+- It is testable directly — open Brave, ask for YouTube Music, observe a tab;
+  close Brave, ask again, observe the app. Recorded as an acceptance item.
+- It reinforces defect 1 rather than replacing it. Process-presence verification
+  cannot distinguish these two outcomes *at all*, which is why the defect
+  survived acceptance in the first place. Window-level verification (P2-WIN-08)
+  can, and must.
+
 ---
 
 ## 5. Phase 2 — Deterministic desktop and browser automation

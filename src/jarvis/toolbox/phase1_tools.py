@@ -101,6 +101,27 @@ class OpenApplicationTool:
 
     def __init__(self, catalogue: ApplicationCatalogue) -> None:
         self._catalogue = catalogue
+        # The allow-list has to be visible when the tool is *chosen*, not only
+        # enforced after it has been chosen wrongly. Asked to "open YouTube
+        # Music", the model called `web.open_url` with music.youtube.com —
+        # which opens a tab by definition — because nothing in this schema said
+        # YouTube Music was an application it could open. Naming the entries is
+        # not a widening: the model still chooses an entry, never a binary
+        # (ADR-0029 constraint 3).
+        entries = ", ".join(
+            f"{entry.app_id} ({entry.display_name})" for entry in catalogue.entries()
+        )
+        self.spec = type(self).spec.model_copy(
+            update={
+                "description": (
+                    "Open an application the user has already approved. Approved "
+                    f"entries: {entries or 'none'}. Prefer this over any web tool "
+                    "when the user names one of these, even where the application "
+                    "also has a website — opening the site gives them a browser "
+                    "tab, not the application they asked for."
+                )
+            }
+        )
 
     def run(self, context: ToolContext, parameters: BaseModel) -> ToolExecution:
         assert isinstance(parameters, OpenApplicationInput)

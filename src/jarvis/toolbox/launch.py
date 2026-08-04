@@ -127,11 +127,11 @@ class ApplicationEntry:
     aliases: tuple[str, ...] = field(default_factory=tuple)
 
     def matches(self, name: str) -> bool:
-        lowered = name.strip().casefold()
-        return lowered in {
-            self.app_id.casefold(),
-            self.display_name.casefold(),
-            *(alias.casefold() for alias in self.aliases),
+        wanted = _normalise_name(name)
+        return wanted in {
+            _normalise_name(self.app_id),
+            _normalise_name(self.display_name),
+            *(_normalise_name(alias) for alias in self.aliases),
         }
 
 
@@ -148,6 +148,18 @@ class LaunchOutcome:
 
 def _basename(target: str) -> str:
     return Path(target).name.casefold()
+
+
+def _normalise_name(name: str) -> str:
+    """Fold the separators a model guesses between, and nothing else.
+
+    "youtube-music", "youtube_music" and "YouTube  Music" are one intention
+    spelled three ways, and refusing two of them as `unknown_application` turns
+    a correct request into a dead end. This widens *spelling*, never scope: an
+    entry is still found only by its id, display name or declared aliases, and
+    never by a path (ADR-0029 constraint 3).
+    """
+    return re.sub(r"[\s_-]+", " ", name.strip().casefold())
 
 
 def validate_entry(entry: ApplicationEntry) -> None:
@@ -185,9 +197,15 @@ def _validate_argument(entry: ApplicationEntry, argument: str | None) -> list[st
     """Constraint 5: validate the caller's argument against the entry's type."""
     if entry.argument_kind is ArgumentKind.NONE:
         if argument:
+            # ADR-0010: name what is not possible *and* what is. "Does not take
+            # an argument" left "play Sunflower on YouTube Music" with no next
+            # move, and invited the model to retry the identical call.
             raise CatalogueError(
                 f"'{entry.app_id}' does not take an argument, so '{argument}' "
-                "was refused rather than passed through."
+                f"was refused rather than passed through. Jarvis can open "
+                f"{entry.display_name}, but it cannot search for or choose "
+                "content inside it yet — that needs browser automation, which "
+                "is not built."
             )
         return []
 

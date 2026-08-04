@@ -181,4 +181,48 @@ and may be too long spoken aloud.
 
 ---
 
+## 0.7 — Test the real cause of the YouTube Music tab ⭐ **the useful one**
+
+You reported YouTube Music now opens correctly. **My change cannot have caused
+that** — it altered what Jarvis *reports*, never what it launches. What else
+changed is that the spikes left **Brave closed**.
+
+That gives a fourth hypothesis, better than the three in the backlog:
+
+> With Brave **closed**, `chrome_proxy.exe --app-id=<id>` starts the browser fresh
+> and it honours the app id → **the app opens**.
+> With Brave **already running**, the new process hands its command line to the
+> existing instance → **a tab opens**.
+
+**Do:** two runs, in this order.
+
+1. **Close Brave completely.** Ask Jarvis to open YouTube Music.
+2. **Leave Brave open.** Ask Jarvis to open YouTube Music again.
+
+**Tell me:** which of the two gave you the app and which gave you a tab. That one
+observation either confirms the cause or kills it.
+
+**If confirmed**, it is not a YouTube Music bug — it is a general property of
+launching anything that hands off to a running instance, and it changes how the
+Phase 2 application catalogue has to verify itself.
+
+## 0.8 — Two smaller fixes you may notice
+
+**Jarvis is no longer fussy about how an app is spelled.** `youtube-music`,
+`youtube_music`, `YouTube  Music` and `yt music` all resolve now. Previously only
+some spellings did, and the rest came back as "not in the approved catalogue" —
+which read as a permission problem when it was a punctuation problem. Resolution
+is still restricted to ids, display names and declared aliases; it never resolves
+a path.
+
+**Asking for something inside an app now says what Jarvis can actually do.**
+"Play Sunflower on YouTube Music" previously failed with *"does not take an
+argument"*, which is true and useless. It now says it can open YouTube Music but
+cannot search or choose content inside it yet, because that needs browser
+automation — stage 3.
+
+**Tell me:** if either message is wrong or reads badly aloud.
+
+---
+
 <!-- Stage 1 section is added here when stage 1 completes. -->

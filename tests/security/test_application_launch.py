@@ -353,6 +353,69 @@ def test_a_launch_is_not_verified_by_a_process_that_was_already_running(monkeypa
     )
 
 
+def test_the_planner_can_see_which_applications_exist() -> None:
+    """Defect 2: the model called `web.open_url` for "open YouTube Music".
+
+    Both tools are catalogued and both look plausible, and nothing in `app.open`'s
+    schema told the planner that YouTube Music *is* an application it can open.
+    Handing a URL to a browser opens a tab by definition, so the launcher was
+    never involved and the app-id vector was never at fault.
+
+    The allow-list has to be visible at the moment the tool is chosen, not only
+    enforced after it has been chosen wrongly.
+    """
+    from jarvis.toolbox.launch import default_catalogue
+    from jarvis.toolbox.phase1_tools import OpenApplicationTool
+
+    catalogue = default_catalogue()
+    schema = OpenApplicationTool(catalogue).spec.json_schema_for_model()
+    rendered = str(schema).casefold()
+
+    for app_id in catalogue.ids():
+        assert app_id in rendered, (
+            f"'{app_id}' is approved but invisible to the planner, which is how "
+            "it ends up guessing a tool instead of naming an entry"
+        )
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    ["youtube-music", "youtube_music", "YouTube  Music", "  yt music  ", "YOUTUBE MUSIC"],
+)
+def test_an_application_resolves_however_the_model_punctuates_it(spoken: str) -> None:
+    """Defect 3: `youtube-music` was refused as an unknown application.
+
+    The model guesses separators — hyphen, underscore, space — and a catalogue
+    that only matches one of them turns a correct intention into
+    `unknown_application`. This is not laxity: resolution is still restricted to
+    ids, display names and declared aliases, never to a path (constraint 3).
+    """
+    from jarvis.toolbox.launch import default_catalogue
+
+    catalogue = default_catalogue()
+    assert catalogue.resolve(spoken) is catalogue.get("youtube_music")
+
+
+def test_an_unsupported_argument_says_what_can_be_done_instead() -> None:
+    """Defect 3: "play Sunflower on YouTube Music" failed with only a refusal.
+
+    ADR-0010: an honest failure names what is *not* possible and what is. Saying
+    only "does not take an argument" leaves the user, and the model, with no next
+    move — and invites the model to retry the same call.
+    """
+    from jarvis.toolbox.launch import CatalogueError, default_catalogue, launch
+
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+
+    with pytest.raises(CatalogueError) as raised:
+        launch(entry, "Sunflower")
+
+    message = str(raised.value).casefold()
+    assert "sunflower" in message, "say what was refused"
+    assert "open" in message, "and say what it can still do"
+
+
 def test_a_launch_is_verified_when_the_process_appears_because_of_it(monkeypatch) -> None:
     """The honest positive case must still work, or the fix is just pessimism."""
     from jarvis.toolbox import launch as launch_module
