@@ -21,6 +21,9 @@ from typing import Any, Protocol, Sequence, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# L2 -> L3 is the permitted direction: jarvis.llm may depend on jarvis.core.
+from jarvis.core.observations import Observation
+
 __all__ = [
     "ChatRole",
     "ChatMessage",
@@ -68,6 +71,28 @@ class ChatMessage(BaseModel):
     tool_call_id: str | None = None
     untrusted: bool = False
     source_label: str | None = None
+
+    @classmethod
+    def from_observation(cls, observation: "Observation") -> "ChatMessage":
+        """The only route from observed content into a prompt.
+
+        ``untrusted`` is set here, unconditionally, and is not a parameter of
+        this constructor. The flag on its own was a discipline every call site
+        had to remember, and a control that holds until one call site forgets is
+        not a control — so anything arriving as an `Observation` is wrapped as
+        data whether or not the caller thought about it (PRD §11.4).
+
+        This lives in L3 rather than on `Observation` itself because
+        `jarvis.core` is L2 and must not know about `jarvis.llm`. Dependencies
+        point downward, and `tests/security/test_layering.py` enforces that even
+        for an import tucked inside a function body.
+        """
+        return cls(
+            role=ChatRole.TOOL,
+            content=observation.text,
+            untrusted=True,
+            source_label=observation.source_label,
+        )
 
 
 class ToolCallProposal(BaseModel):

@@ -80,6 +80,18 @@ Every one of the following must be wrapped and handled by the planner as an **ob
 - Imported `.jarvispack` packages and imported skills must go through explicit preview, conflict detection, and approval before anything in them becomes active (`PRD.md` §14.6, FR-105, FR-224). A skill manifest carries a `signed` field (`PRD.md` §14.5); Phase 0 does not yet define or implement a signing authority, so no skill can currently be trusted on the basis of a signature alone — see §14 status table.
 - Model output must always be structured, schema-validated data — "Free-form natural-language instructions must never be executed directly" (`PRD.md` §13.4).
 
+### 2.4 How the rule is enforced, and what each mechanism is worth
+
+Added in Phase 2 stage 1, when untrusted content first reached the planner. The three mechanisms are listed weakest first, deliberately — the ordering is the point, because the strongest one is the only one that assumes nothing about the model's cooperation.
+
+| Mechanism | What it does | What it is worth |
+|---|---|---|
+| **Delimiter wrapping** — `<<<UNTRUSTED_OBSERVATION>>>` … `<<<END_UNTRUSTED_OBSERVATION>>>` (`jarvis.llm.ollama.chat`) | Marks observed content as data and instructs the planner that nothing inside authorises anything | **Defence in depth only.** It asks a model to behave, and a model that ignores the instruction defeats it entirely. It is not a security boundary and must never be described as one |
+| **`Observation` as the only shape external content may take** (`jarvis.core.observations`) | Untrusted by construction. `ChatMessage.from_observation()` is the only route into a prompt and sets `untrusted=True` unconditionally, with no parameter to say otherwise. The type has no field for a capability, grant, risk level or tool id | Removes the class of defect where one call site forgets a boolean, and removes any field a hostile page could populate with authority |
+| **Positional selection** (`ObservedList.select(position)`) | Actions on observed lists resolve by ordinal. There is no lookup by label, title or text, asserted structurally by `tests/security/test_prompt_injection.py` | **The control that carries the weight.** "Play the second video" is `items[1]`. A page can rename itself freely and cannot change which element an action lands on, whatever the model believes |
+
+**Delimiter escaping.** Observed content is scanned for the delimiters themselves before it is wrapped. They are fixed, published constants in the source, so any page, filename or document can contain one; embedded verbatim, a page carrying `<<<END_UNTRUSTED_OBSERVATION>>>` closed the quoted region early and everything after it read as trusted context. Occurrences are escaped rather than deleted — an attempt to break out is evidence, and removing it would hide the attack from the audit log without adding any safety. Regression test: `test_a_page_cannot_close_the_wrapper_and_speak_as_the_system`.
+
 ---
 
 ## 3. Capability risk classification

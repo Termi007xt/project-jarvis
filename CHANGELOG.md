@@ -9,6 +9,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 In progress. Stage 0 (measure and unblock) is complete; no automation capability
 has shipped yet.
 
+### Security
+
+- **A web page could break out of the wrapper that quotes it.** Content observed
+  from outside — pages, filenames, documents — is enclosed in delimiters that
+  tell the model it is data and authorises nothing. Those delimiters are fixed
+  strings published in the source, and the content was embedded verbatim, so a
+  page containing the closing delimiter ended the quoted region early and
+  anything it wrote after that point appeared to the model as trusted context.
+  Delimiters in observed content are now escaped, and kept visible rather than
+  stripped, so an attempt to break out shows up in the audit log instead of
+  silently disappearing. Found by the test written for it, before any code in
+  this product could fetch a page.
+- **Observed content now has one shape and no trusted variant.** Everything read
+  from outside becomes an `Observation`, which cannot express a capability, a
+  grant, a risk level or a tool id, and which reaches the model through a single
+  constructor that marks it untrusted with no way to override.
+- **Choosing "the second video" is now a position, not a title.** Actions on
+  observed lists resolve by ordinal, and there is no lookup by text at all, so a
+  page cannot rename itself into redirecting an action. This is the control that
+  does not depend on the model cooperating; the delimiters are defence in depth.
+
 ### Changed
 
 - **Jarvis no longer claims it verified an application launch when it did not.**

@@ -149,8 +149,58 @@ all of it gates something. Plan: `docs/phase-plans/PHASE-02-PLAN.md` §5.
 | `automation` optional extra with lazy imports | **Done.** Suite still green |
 | CDP spike part B — Playwright attach + index-addressable results | **Done.** Measured |
 | ADR-0018, ADR-0019, ADR-0023, ADR-0031 | **Done.** Recorded |
-| YouTube Music defect | **Diagnosed, not fixed.** See `docs/BACKLOG.md` §4.6.1 |
-| Fixes for the three diagnosed defects | **Not started** — the remaining stage 0 work |
+| YouTube Music defect | **Diagnosed and fixed.** See `docs/BACKLOG.md` §4.6.1 |
+
+**Stage 0 is complete and was accepted by the owner on 2026-08-04.** Suite at
+stage 0 close: **925 passed, 2 skipped** (916 at phase start).
+
+**Stage 1 — the untrusted-content boundary — is complete.** Suite at stage 1
+close: **1029 passed, 2 skipped.** Acceptance items are in
+`docs/PHASE-02-ACCEPTANCE-TESTING.md`; none of them block stage 2.
+
+### What stage 1 built, and the hole it found
+
+Built **before** anything in this product can fetch a page, which is the ordering
+the whole plan turns on: a defence written after the capability gets shaped to
+fit whatever the capability happened to emit.
+
+- **`jarvis.core.observations`** (L2) — `Observation`, `ObservedItem`,
+  `ObservedList`. External content has one shape and no trusted variant. The type
+  has no field for a capability, grant, risk level or tool id, so there is
+  nothing a hostile page could populate.
+- **`ChatMessage.from_observation()`** (L3) is the only route into a prompt and
+  sets `untrusted=True` with no parameter to override it. It lives in L3, not on
+  `Observation`, because L2 must not know about L3 —
+  `tests/security/test_layering.py` caught the first attempt, which had the
+  import hidden inside a function, and was right to.
+- **`ObservedList.select(position)`** is positional only. No lookup by label,
+  title or text exists, asserted structurally. **This is the control that carries
+  the weight**; the delimiters are defence in depth and assume a cooperative
+  model, this assumes nothing.
+- **A real vulnerability, found and fixed.** The delimiters that quote untrusted
+  content are fixed strings published in our own source, and content was embedded
+  verbatim — so a page containing `<<<END_UNTRUSTED_OBSERVATION>>>` closed the
+  quoted region early and everything after it read as trusted context. Shipped in
+  Phase 0 and Phase 1; unexploitable only because nothing could read a page yet.
+  Delimiters in observed content are now escaped, and left visible rather than
+  stripped, so a breakout attempt is evidence rather than a silent disappearance.
+  `ARCHITECTURE.md` §13 gap 4 called this strategy "specified but unexercised" —
+  exercising it is what found the hole.
+- **`tests/security/test_browser_attach.py`** fails the build if any module in
+  `src/` calls a Playwright launch API or passes `executable_path`, and asserts
+  `ALLOW_LIST` has not grown. `test_no_shell.py` AST-scans `src/` and cannot see
+  into `site-packages`, so without this a Playwright launch would create a second
+  process-creation call site with the suite still green (ADR-0031).
+
+The three diagnosed defects are fixed: launches no longer verify themselves
+against a process that was already running; the planner can see which
+applications it may open, so it stops routing "open YouTube Music" to a URL; and
+application names resolve however the model punctuates them. A **fourth** cause
+surfaced during acceptance and is the leading explanation for the original
+symptom — a launch that hands its command line to an already-running Brave
+appears to open a tab rather than the app. It is unconfirmed, it is recorded in
+§4.6.1, and `docs/PHASE-02-ACCEPTANCE-TESTING.md` §0.7 is the two-run test that
+settles it.
 
 ### What stage 0 measured, on this machine, 2026-08-04
 
@@ -284,49 +334,54 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Phase 1 is merged. Phase 2 stage 0 is nearly complete. Start here.**
+**Stages 0 and 1 are complete. Stage 2 is next.**
 
-1. **Finish stage 0: fix the three YouTube Music defects.** They are fully
-   diagnosed in `docs/BACKLOG.md` §4.6.1, with the evidence. Write the test
-   first — this is state-related. In rough order of value:
-   - **Stop `youtube_music` claiming `verified`** when all it observed was that
-     Brave was already running. Real verification needs a *window*, which is
-     UI Automation, which is P2-WIN-08 in stage 4. Until then the honest outcome
-     is `unverified`, and the rule to encode is that **a verification target must
-     be able to distinguish "my effect happened" from "something unrelated was
-     already true."**
-   - **Let the planner see the catalogue.** It called `web.open_url` for
-     "open YouTube Music" because nothing in the tool schema told it YouTube Music
-     was an application it could open. Catalogue-driven valid values in
-     `OpenApplicationInput` fixes the mis-routing and the `youtube-music`
-     guess in one change.
-   - **Honest failure when an argument is not supported** — "play Sunflower on
-     YouTube Music" currently fails with *"does not take an argument"*, which
-     says what is wrong but not what is possible (ADR-0010).
+1. **Stage 2 — automation foundations, before anything moves.** In dependency
+   order: **P2-WIN-03** (automation worker thread, pywinauto UIA backend, XL) →
+   **P2-WIN-02** (UIA inspector: accessible name, control type, automation id,
+   patterns) → **P2-WIN-04** (acquire `foreground_desktop` before any mouse or
+   keyboard action) → **P2-WIN-05** (real input pauses the task, AT-008).
 
-2. **Then request the stage 0 checkpoint.** Do not start stage 1 without it;
-   the delivery mode is checkpoint-per-stage (plan §2.1).
+2. **P2-WIN-04 is wiring, not building.** `ResourceLockManager` already exists
+   and already knows `foreground_desktop` (`tasks/locks.py:33`), including
+   stale-lock reclamation after a crash — without which one crash while holding
+   the lock would wedge every future automation task.
 
-3. **Stage 1 is the untrusted-content boundary — built before anything can fetch
-   a page.** A typed `Observation` that is untrusted by construction, plus
-   `tests/security/test_prompt_injection.py` against a fixture, with no browser
-   behind it. The ordering is the point: a defence built after the capability
-   gets shaped to fit whatever the capability happened to emit. Stage 0 proved
-   the structural control is available — results are index-addressable, so
-   selection is positional and a page cannot rename its way into redirecting an
-   action.
+3. **The ordering constraint in stage 2 is absolute:** P2-WIN-04 and P2-WIN-05
+   land **before the first tool that moves anything.** Retrofitting a lock onto
+   tools written without it is how Phase 1's defect class is reproduced.
 
-4. **Do not let Playwright launch a browser.** `launch`, `launch_persistent_context`
-   and `executable_path` must not appear in `src/`. `tests/security/test_no_shell.py`
-   AST-scans `src/` only, so a Playwright launch would create a process the
-   scanner cannot see and the suite would stay green while ADR-0029's invariant
-   was false. ADR-0031 records this and requires a test asserting it.
+4. **Write the structural lock test early.** A tool that moves the mouse or
+   keyboard and does not declare `foreground_desktop` in `resource_locks` must
+   fail the build. `tests/security/test_tool_specs_are_valid.py` already works
+   this way. A rule enforced by a test beats a rule everyone remembers —
+   `voice.speak` shipped with a lock name the system did not recognise, and every
+   attempt to speak died in the invoker with a raw `ValueError`.
 
-5. **Deferred to stage 6, deliberately:** the time/date tool (gates nothing) and
+5. **Stage 3 consumes stage 1's boundary; do not build a second one.** The
+   browser adapter produces `ObservedList` / `Observation`
+   (`jarvis.core.observations`) and selects by ordinal. If a `find_by_title` or
+   similar appears anywhere, the injection defence has been undone —
+   `tests/security/test_prompt_injection.py` asserts structurally that no such
+   method exists.
+
+6. **Do not let Playwright launch a browser.** Enforced by
+   `tests/security/test_browser_attach.py` (ADR-0031), but worth knowing rather
+   than discovering: launch the browser through
+   `jarvis.toolbox.launch.launch_argv` with a debugging port and attach with
+   `connect_over_cdp`.
+
+7. **Deferred to stage 6, deliberately:** the time/date tool (gates nothing) and
    the application-catalogue work (P2-WIN-01, behind its own ADR — Start-menu
    discovery as the executable source, approval on first use, a `.lnk` parser
    that runs nothing, care around the `powershell.exe` shortcut every Start menu
    contains).
+
+8. **Outstanding for the owner, not blocking:** `docs/PHASE-02-ACCEPTANCE-TESTING.md`
+   §0.7 is the two-run test that would confirm the leading cause of the original
+   YouTube Music tab (Brave closed → app; Brave running → tab). One observation
+   settles it, and if it holds it changes how the Phase 2 application catalogue
+   must verify itself.
 
 6. **Graphify is stale and cannot update without an LLM API key.** `graphify .
    --update` exits reporting `no LLM API key found`; 17 changed docs need
