@@ -36,6 +36,7 @@ from typing import Any, Protocol
 from urllib.parse import quote_plus
 
 from jarvis.core.observations import ContentClass, ObservedItem, ObservedList
+from jarvis.toolbox.captcha import describe_challenge
 
 __all__ = [
     "PageDriver",
@@ -81,6 +82,8 @@ class PageDriver(Protocol):
     """
 
     def goto(self, url: str, timeout_seconds: float) -> None: ...
+
+    def content(self) -> str: ...
 
     def results(self, timeout_seconds: float) -> list[dict[str, str]]: ...
 
@@ -138,6 +141,12 @@ class YouTubeAdapter:
         """Search, and return the results as untrusted, positional content."""
         url = SEARCH_URL_TEMPLATE.format(query=quote_plus(query.strip()))
         self._page.goto(url, self._timeout)
+
+        # Before reading anything: if the site is showing an anti-bot check,
+        # stop and hand the window over. Jarvis has no capability to solve one
+        # (FR-058, PRD §11.1), and reading results from a challenge page would
+        # produce a confidently empty list instead of an honest refusal.
+        describe_challenge(self._page.content())
 
         raw = self._page.results(self._timeout)
         self._video_ids = tuple(str(entry.get("video_id", "")) for entry in raw)

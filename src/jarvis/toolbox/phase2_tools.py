@@ -35,6 +35,7 @@ from jarvis.core.tools.contract import (
     Verification,
 )
 from jarvis.tasks.locks import FOREGROUND_DESKTOP
+from jarvis.toolbox.captcha import ChallengeDetected
 
 __all__ = [
     "YouTubeSearchTool",
@@ -158,7 +159,12 @@ class YouTubeSearchTool:
         retry_policy=RetryPolicy(max_attempts=1),
         changes_state=True,
         verification="Reports how many results were actually read from the page.",
-        failure_codes=("browser_unavailable", "no_browser_session", "search_failed"),
+        failure_codes=(
+            "browser_unavailable",
+            "no_browser_session",
+            "search_failed",
+            "challenge_detected",
+        ),
         target_parameter="query",
         reversible=True,
     )
@@ -172,6 +178,10 @@ class YouTubeSearchTool:
 
         try:
             results = adapter.search(parameters.query)
+        except ChallengeDetected as exc:
+            # Its own code, not "search_failed": the user has something to do
+            # about this one, and the message already says exactly what.
+            raise ToolFailure("challenge_detected", str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - declared failure code
             raise ToolFailure("search_failed", f"the search did not complete: {exc}") from exc
 

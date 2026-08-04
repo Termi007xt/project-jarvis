@@ -418,4 +418,81 @@ against one — that happens in stage 3, when there is something to drive.
 
 ---
 
-<!-- Stage 3 section is added here when stage 3 completes. -->
+# Stage 3 — the browser, and the exit criterion
+
+**Status: the exit criterion works.** You ran *"search rtx 5070 on youtube"* then
+*"play the second video"* on 2026-08-04 and it played the right video. That is
+PRD §21's first Phase 2 exit criterion, met on real hardware rather than against
+a fixture.
+
+## 3.1 — One question I need answered ⭐ **before I record the criterion as met**
+
+Did it report **verified**, or **unverified**?
+
+This is not pedantry — it is the distinction the entire phase is built around,
+and the difference between the criterion passing and merely looking like it did:
+
+- **Verified** — Jarvis clicked, then read the player back, confirmed something
+  is playing, and confirmed the playing video's id matches the one at position
+  1. The reply would read like *"Playing result 1: …"*.
+- **Unverified** — the click landed and nothing confirmed the result. The reply
+  would say *"the player could not be read, so whether anything is playing is
+  unverified"*.
+
+Both look identical on screen, because in both cases a video is playing in front
+of you. Only the reply text distinguishes them. If it said unverified, the
+feature works and the *verification* does not, and I would rather fix that now
+than record an exit criterion that rests on you having seen a video play.
+
+**Tell me:** which of those two the reply looked like.
+
+## 3.2 — What happens if a site challenges Jarvis
+
+**Do:** nothing deliberately — this is here so it is not a surprise.
+
+If YouTube (or anything else) shows a CAPTCHA or an anti-bot check, Jarvis
+**stops and hands you the window**. It will not solve one, click one, or work
+around one. That is a prohibited capability under PRD §11.1, not a missing
+feature, and there is deliberately no code that could do it — a test fails the
+build if a function appears here whose name suggests solving or bypassing.
+
+You would see: *"The site is showing a reCAPTCHA check. Jarvis will not attempt
+to solve or work around one — that is a capability it does not have, by design.
+The browser window is yours: complete the check yourself, and then ask again."*
+
+**Tell me:** if you ever see that message when there is no challenge on screen.
+A false positive stops a task you asked for, and would be a real defect.
+
+## 3.3 — Close Brave before asking Jarvis to use it
+
+**A limitation worth knowing rather than hitting.** If Brave is already running,
+a second launch hands its command line to the existing instance and exits — so
+no debugging port opens and Jarvis reports that it could not open the browser.
+
+This is the same behaviour behind the YouTube Music tab (§0.7), and it is a
+property of Chromium, not a bug in Jarvis. Jarvis says so plainly rather than
+failing obscurely.
+
+**Tell me:** whether this is annoying enough in daily use to be worth solving.
+There are options, none free, and I would rather know it bites you than assume.
+
+## 3.4 — Optional: confirm the suite
+
+```powershell
+python -m pytest
+```
+
+**You should see:** `1111 passed, 2 skipped`.
+
+> **One intermittent failure was seen once** and is recorded in
+> `docs/PROJECT_STATE.md`:
+> `test_a_completed_task_is_never_re_run_after_recovery` failed with *"cannot
+> move a task from 'running' to 'running'"*, then passed on every re-run. It is
+> not caused by the stage 3 work. It implies a race between the scheduler and
+> startup recovery, and the test is named for the property such a race would
+> break — a consequential action re-run after a crash. **If you see it, tell
+> me**; do not re-run until it goes green.
+
+---
+
+<!-- Stage 4 section is added here when stage 4 completes. -->

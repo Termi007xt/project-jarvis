@@ -208,6 +208,21 @@ class PlaywrightPageDriver:
     def goto(self, url: str, timeout_seconds: float) -> None:
         self._page.goto(url, timeout=timeout_seconds * 1000, wait_until="domcontentloaded")
 
+    def content(self) -> str:
+        """The page's markup, for anti-bot detection only (FR-058).
+
+        Untrusted, like everything else read from a page. It is used solely to
+        decide whether to *stop*, never to decide whether to proceed — see
+        `jarvis.toolbox.captcha` for why that direction matters.
+        """
+        try:
+            return self._page.content()
+        except Exception:  # noqa: BLE001
+            # An unreadable page is not a challenge; let the normal result path
+            # report honestly rather than inventing a CAPTCHA.
+            _LOG.debug("page content could not be read", exc_info=True)
+            return ""
+
     def results(self, timeout_seconds: float) -> list[dict[str, str]]:
         try:
             self._page.wait_for_selector(RESULT_SELECTOR, timeout=timeout_seconds * 1000)

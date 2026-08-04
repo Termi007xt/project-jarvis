@@ -47,10 +47,18 @@ def no_sleep(_seconds: float) -> None:
 class FakePage:
     """A stand-in for a Playwright page attached over CDP."""
 
-    def __init__(self, *, results=None, player=None, fail_click: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        results=None,
+        player=None,
+        fail_click: bool = False,
+        markup: str = "<div>ordinary results</div>",
+    ) -> None:
         self.navigations: list[tuple[str, float]] = []
         self.clicked: list[str] = []
         self.fail_click = fail_click
+        self.markup = markup
         self._results = results if results is not None else [
             {"title": "NVIDIA is Selling Lies | RTX 5070 Review", "video_id": "aaa111"},
             {"title": HOSTILE, "video_id": "bbb222"},
@@ -61,6 +69,9 @@ class FakePage:
 
     def goto(self, url: str, timeout_seconds: float) -> None:
         self.navigations.append((url, timeout_seconds))
+
+    def content(self) -> str:
+        return self.markup
 
     def results(self, timeout_seconds: float) -> list[dict[str, str]]:
         return list(self._results)
@@ -189,6 +200,23 @@ def test_a_paused_player_is_not_playing(page) -> None:
     adapter.search("RTX 5070")
 
     assert adapter.play(1).verified is False
+
+
+def test_a_challenge_page_stops_the_search_rather_than_returning_nothing() -> None:
+    """FR-058, wired in rather than merely available.
+
+    A detector nothing calls is the same defect as a tool connected to nothing.
+    Reading results off a challenge page would produce a confidently empty list
+    — "no results for RTX 5070" — which is worse than an honest refusal because
+    it looks like an answer.
+    """
+    from jarvis.toolbox.captcha import ChallengeDetected
+
+    blocked = FakePage(markup='<div class="h-captcha" data-sitekey="x"></div>')
+    adapter = YouTubeAdapter(page=blocked, sleep=no_sleep)
+
+    with pytest.raises(ChallengeDetected):
+        adapter.search("RTX 5070")
 
 
 def test_a_click_that_never_lands_is_a_failure_not_an_unverified_success(page) -> None:

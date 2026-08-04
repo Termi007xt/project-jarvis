@@ -263,7 +263,31 @@ outside the security policy, the same status `tools/voice-lab/` holds.
 
 ## Blocked or Failing
 
-Nothing is blocked and no test is failing.
+Nothing is blocked.
+
+### One intermittent failure, seen once, not yet explained
+
+`tests/integration/test_core_lifecycle.py::test_a_completed_task_is_never_re_run_after_recovery`
+failed **once** during Phase 2 stage 3 with:
+
+```
+InvalidTransitionError: cannot move a task from 'running' to 'running'.
+```
+
+It then passed three times in isolation and the full suite passed twice more, so
+it is intermittent rather than broken, and it is **not** caused by the change
+that was in flight when it appeared (adding an import and a failure code).
+
+Recorded rather than shrugged off, because of what it implies: two things are
+transitioning the same task, which means a race between the scheduler and
+startup recovery. A recovery path that can re-enter a running task is exactly
+the class of defect that stays invisible until it re-runs a consequential action
+after a crash — and `test_a_completed_task_is_never_re_run_after_recovery` is
+named for the property it would break.
+
+**Do not chase it by re-running until green.** It needs the transition to be
+made idempotent, or the recovery path to take the task lock the scheduler holds.
+Reproduce with the full suite in a loop, not the single test.
 
 **Known defects carried into Phase 2** — all in `docs/BACKLOG.md` §4.6, none of
 them silent in the product:
