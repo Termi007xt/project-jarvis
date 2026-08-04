@@ -104,6 +104,87 @@ def test_closing_twice_is_safe() -> None:
     workspace.close()
 
 
+# -- recovering from a browser the user closed ----------------------------
+class DyingSession:
+    """A session whose page dies, as Playwright's does when Brave is closed."""
+
+    opened = 0
+
+    def __init__(self) -> None:
+        type(self).opened += 1
+        self.generation = type(self).opened
+        self.alive = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.alive = False
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def page(self):
+        return self
+
+    # The page driver surface the workspace hands to the adapter.
+    def content(self) -> str:
+        self._check()
+        return "<div>ok</div>"
+
+    def goto(self, url, timeout_seconds):
+        self._check()
+
+    def results(self, timeout_seconds):
+        self._check()
+        return [{"title": "a video", "video_id": "vid1"}]
+
+    def click_result(self, position, timeout_seconds):
+        self._check()
+
+    def player_state(self, timeout_seconds):
+        self._check()
+        return {"playing": True, "video_id": "vid1"}
+
+    def _check(self) -> None:
+        if not self.alive:
+            raise RuntimeError("Target page, context or browser has been closed")
+
+
+def test_a_browser_the_user_closed_is_reopened_rather_than_failing_forever() -> None:
+    """The defect from real use, reported 2026-08-04.
+
+    Closing Brave left the workspace holding a dead page, and *every* later
+    request failed with "Target page, context or browser has been closed" until
+    Jarvis itself was restarted. The user closing their browser is completely
+    ordinary, so a session that cannot survive it is not usable.
+    """
+    DyingSession.opened = 0
+    workspace = BrowserWorkspace(session_factory=DyingSession)
+
+    first = workspace.adapter
+    first.search("anything")
+    assert DyingSession.opened == 1
+
+    # The user closes Brave.
+    workspace._session.alive = False  # type: ignore[union-attr]
+
+    second = workspace.adapter
+    second.search("anything again")
+    assert DyingSession.opened == 2, "a dead session must be replaced, not reused"
+
+
+def test_a_dead_session_is_detected_before_it_is_handed_out() -> None:
+    DyingSession.opened = 0
+    workspace = BrowserWorkspace(session_factory=DyingSession)
+    workspace.adapter
+    workspace._session.alive = False  # type: ignore[union-attr]
+
+    assert workspace.is_open is False, (
+        "a session whose browser has gone must not still report as open"
+    )
+
+
 def test_shutting_down_the_core_closes_the_browser(core) -> None:
     """The shutdown path must actually reach the workspace."""
     closed: list[bool] = []

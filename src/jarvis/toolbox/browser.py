@@ -126,6 +126,22 @@ class BraveCdpSession:
     def attached(self) -> bool:
         return self._browser is not None
 
+    def is_alive(self) -> bool:
+        """Whether the browser we attached to is still running.
+
+        Attached is not alive: the user closing Brave leaves this object holding
+        a browser handle whose every call raises "Target page, context or
+        browser has been closed". Asking Playwright directly is the only honest
+        answer, and it is what lets the workspace reopen instead of failing for
+        the rest of the session.
+        """
+        if self._browser is None:
+            return False
+        try:
+            return bool(self._browser.is_connected())
+        except Exception:  # noqa: BLE001 - a handle that cannot answer is gone
+            return False
+
     def __enter__(self) -> "BraveCdpSession":
         try:
             from playwright.sync_api import sync_playwright

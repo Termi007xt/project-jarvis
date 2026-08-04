@@ -80,8 +80,34 @@ class BrowserWorkspace:
         self._session = session
         self._adapter = YouTubeAdapter(page=session.page())
 
+    def _session_is_alive(self) -> bool:
+        """Whether the browser we attached to is still there.
+
+        Reported from real use, 2026-08-04: closing Brave left this holding a
+        dead page, and every later request failed with "Target page, context or
+        browser has been closed" until Jarvis itself was restarted. A user
+        closing their own browser is completely ordinary, so a session that
+        cannot survive it is not usable.
+        """
+        if self._session is None:
+            return False
+        probe = getattr(self._session, "is_alive", None)
+        if probe is None:
+            return True  # a session that cannot say is assumed live
+        try:
+            return bool(probe())
+        except Exception:  # noqa: BLE001 - an unanswerable probe means gone
+            return False
+
     @property
     def adapter(self):
+        # Checked before handing it out, not after a call has already failed:
+        # the interesting case is the user closing Brave *between* two
+        # commands, which is exactly when nothing is mid-flight to catch.
+        if self._session is not None and not self._session_is_alive():
+            _LOG.info("the browser was closed; discarding the dead session")
+            self.close()
+
         if self._adapter is None:
             if self._session_factory is None:
                 raise ToolFailure(
@@ -100,7 +126,8 @@ class BrowserWorkspace:
 
     @property
     def is_open(self) -> bool:
-        return self._session is not None
+        """Open *and* still alive. A dead session must not report as open."""
+        return self._session is not None and self._session_is_alive()
 
     def close(self) -> None:
         """Shut the browser down. Idempotent, and safe to call during teardown.
