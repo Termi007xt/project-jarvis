@@ -68,6 +68,31 @@ artificial — each produces something checkable by a human:
 A stage is not accepted on a green suite. Each checkpoint names what a human must
 observe, in the manner of `docs/PHASE-01-ACCEPTANCE-TESTING.md`.
 
+### 2.2 Why checkpoints do not cost continuity
+
+Phase 1 ran continuously for a stated reason: to stop the agent losing track of
+overall progress when a long debugging detour consumes the context window. That
+concern is real, and it is worth separating from what a checkpoint actually is.
+
+**A checkpoint is an acceptance point, not a context boundary.** It does not
+require a new session. Where context is healthy at a stage boundary, work
+continues in the same conversation and the checkpoint costs one exchange.
+
+What makes it safe when context *is* lost is not the agent's memory. It is that
+**every stage ends by updating `docs/PROJECT_STATE.md` and committing, before
+acceptance is requested.** The resume point is on disk, always. This is not a new
+mechanism invented for Phase 2 — it is what `CLAUDE.md` already requires, and it
+demonstrably works: the session that wrote this plan began with no prior context
+and reconstructed the entire Phase 1 state — the carried defects, the reason each
+was deferred, the ADR positions and the acceptance history — from
+`PROJECT_STATE.md`, `docs/BACKLOG.md` and `CLAUDE.md` alone.
+
+The argument against one-shot is stronger in this phase than it was in Phase 1,
+for a reason specific to the work: **stage 0 produces a measurement that decides
+stage 3's architecture.** If the CDP spike comes back against ADR-0019 Option A,
+that is an architectural decision the owner should be present for, not one taken
+alone in the middle of an uninterrupted run.
+
 ---
 
 ## 3. Exit criteria (PRD §21, verbatim)
