@@ -153,27 +153,44 @@ in the ephemeral range, exactly as `ArgumentKind.STEAM_APP_ID` is validated as
 digits. The catalogue entry still fixes *what kind of argument* the entry accepts;
 the engine supplies the value. The model never sees or supplies it.
 
-### The collision, stated in advance
+### The collision that was predicted, and did not happen
 
-Chromium refuses `--remote-debugging-port` when the browser runs against its
-**default user-data directory** — a deliberate guard against cookie theft.
-`--profile-directory=Jarvis` selects a profile *inside* the default user-data
-directory. Brave is Chromium-based and is expected to inherit this.
+**Measured 2026-08-04 on the target machine. The prediction was wrong.**
 
-**If that expectation holds, ADR-0019 Option A and CDP attach are incompatible.**
+This plan originally recorded an expectation that Chromium refuses
+`--remote-debugging-port` when running against its default user-data directory,
+and that ADR-0019 Option A — which selects a profile *inside* that directory —
+would therefore be incompatible with CDP attach. The owner pre-authorised falling
+back to Option B on that basis.
 
-This is stated as an expectation, not a fact. Stage 0 measures it on the target
-machine before any browser code is written. The owner has pre-authorised the
-fallback: if Brave refuses, ADR-0019 is recorded as **Option B** (a
-`--user-data-dir` under the vault) with the measurement attached as the reason.
+`tools/browser-lab/test_cdp_attach.py` measured both options rather than assuming
+either:
 
-Worth recording so the fallback is not read as a loss: Chromium extensions are
-per-profile, so a fresh `Jarvis` profile inherits none of the user's existing
-extensions or customisation under either option. What Option A actually buys over
-Option B is presence in Brave's own profile switcher and an FR-057
-"clear the profile" that maps onto Brave's delete-profile flow. Both real, both
-modest. Option B trades those for stronger filesystem separation from the user's
-personal Brave.
+| Option | argv | Result |
+|---|---|---|
+| **A** — `--profile-directory=Jarvis` | `brave.exe --profile-directory=Jarvis --remote-debugging-port=<ephemeral>` | **CDP opened.** `Chrome/151.0.7922.71`, protocol 1.3 |
+| **B** — `--user-data-dir=<temp>` | `brave.exe --user-data-dir=<temp> --profile-directory=Jarvis --remote-debugging-port=<ephemeral>` | **CDP opened.** Same build |
+
+Brave 151 opens the port under both. **ADR-0019 Option A stands as chosen; the
+pre-authorised Option B fallback is not needed** and is recorded as an available
+alternative rather than a pending decision.
+
+The measurement was taken with no Brave instance already running, which matters:
+a second `brave.exe` normally hands its command line to the existing instance and
+exits, so Option A would have reported "no port" whether the flag was refused or
+merely handed off, and the two causes are indistinguishable. Any re-measurement
+must close Brave first.
+
+Two consequences worth recording:
+
+- Running the spike **created the `Jarvis` profile** in the existing Brave
+  user-data directory. FR-056 wants that profile to exist, so P2-BRW-01 starts
+  from a profile that is already present rather than creating one.
+- Option A's practical advantage over B is narrower than the ADR text implies —
+  Chromium extensions are per-profile, so a fresh `Jarvis` profile inherits none
+  of the user's existing extensions or customisation either way. What Option A
+  actually buys is presence in Brave's own profile switcher and an FR-057
+  "clear the profile" that maps onto Brave's own delete-profile flow.
 
 ### ADR-0031
 

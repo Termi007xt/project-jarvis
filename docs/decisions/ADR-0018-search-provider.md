@@ -1,8 +1,9 @@
 # ADR-0018: Search Provider
 
-- **Status:** Open — decision required before Phase 2
-- **Date:** 2026-08-01
+- **Status:** **Proposed** — Option A, for acceptance at the Phase 2 stage 0 checkpoint
+- **Date:** 2026-08-01, proposed 2026-08-04
 - **Deciders:** Project owner
+- **Phase:** 2
 - **PRD reference:** §25.8, FR-050–FR-053; also FR-054, §18.3
 - **Decision required before:** Phase 2 (deterministic desktop and browser automation, where Brave-based search first ships)
 
@@ -33,7 +34,23 @@ Full FR-050 implementation: visible Brave search, optional API key, and FR-055's
 
 ## Decision
 
-Deferred. No option is selected yet. FR-052's visible Brave search is not actually contingent on this ADR — it is an unconditional PRD requirement and should be built regardless of how the API-key question resolves — so Option A's scope is the safe Phase 2 floor in any case; what remains open is whether and when Option B/C's optional-key modes are added on top.
+**Option A — visible Brave browser search only, no API integration — proposed for Phase 2.** Awaiting owner acceptance at the stage 0 checkpoint.
+
+FR-052's visible Brave search was never contingent on this ADR: it is an unconditional PRD requirement and is built regardless of how the API-key question resolves. Option A's scope is therefore the Phase 2 floor in any case, and the only real question is whether to add Option B/C's optional-key modes *on top* during this phase. The proposal is not to.
+
+### Why Option A for this phase specifically
+
+The strongest argument is structural rather than one of effort. §18.3 forbids shipping shared API keys, and Option A makes that constraint **impossible to violate rather than merely enforced** — there is no key-consuming code path to get wrong, no default that could be filled in, no example value that could be mistaken for a real one. Decision criterion 1 becomes trivially verifiable: a test asserts no API key exists anywhere in `config/defaults.yaml` or the codebase, and it can never regress because there is nothing for a key to plug into.
+
+The secondary argument is scope honesty. Phase 2 already carries the phase's hardest work — the first untrusted content reaching the planner, the first UI Automation, the first browser automation. A programmatic search path is *not* an inherently safer channel than browser content; it is a second untrusted-content channel needing the same FR-054 wrapping discipline, and adding it now means exercising the injection defence against two surfaces in the phase where it is being built for the first time.
+
+Option C is deferred for the reason its own analysis gives: FR-055 has substantial requirements of its own — not scraping unrelated conversation history, waiting for completion, notifying — that make it a browser-automation deliverable in its own right rather than a search mode. It stays in the backlog as P2-BRW-07, to be built only if the phase has room after its exit criteria are met.
+
+### What this defers, and what would reopen it
+
+FR-050's modes 4, 5 and 6 are not built. This is a deferral, not a rejection: the owner may reopen it at any point by supplying their own key, at which point Option B is the natural increment and the only new requirement is that storage goes through the DPAPI secret store (ADR-0030, NFR-022) rather than `user.yaml`.
+
+The concrete trigger to revisit: a repeated need for a search answer folded into a spoken conversational reply, where opening a visible browser tab is the wrong interaction. Nothing in Phase 2's exit criteria requires that.
 
 ## Decision criteria
 

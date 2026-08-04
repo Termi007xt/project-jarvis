@@ -1,8 +1,9 @@
 # ADR-0019: Browser Profile Isolation
 
-- **Status:** Open — decision required before Phase 2
-- **Date:** 2026-08-01
+- **Status:** **Accepted** (Option A, decided 2026-08-04 by the project owner)
+- **Date:** 2026-08-01, decided 2026-08-04
 - **Deciders:** Project owner
+- **Phase:** 2
 - **PRD reference:** §25.9, FR-056–FR-058; also §12.1, `PROJECT_INPUTS.md` `automation.dedicated_browser_profile: Jarvis`
 - **Decision required before:** Phase 2 (Brave dedicated profile is an explicit Phase 2 deliverable)
 
@@ -31,7 +32,39 @@ Use `playwright.chromium.launch_persistent_context()` with Playwright's bundled 
 
 ## Decision
 
-Deferred. No option is selected yet. Option C is effectively ruled out by the existing commitment to Brave specifically, narrowing the real choice to A versus B, both of which can satisfy FR-056–FR-058 — the difference is isolation strength (B) versus native-profile fidelity (A).
+**Option A — a dedicated `Jarvis` profile inside the existing Brave user-data directory, selected with `--profile-directory=Jarvis`.** Decided by the project owner on 2026-08-04.
+
+Option C was already ruled out by the existing commitment to Brave specifically. The choice between A and B was settled on two grounds: the owner's preference for the profile to be a first-class citizen of their own Brave installation, and a measurement that removed the only technical objection to it.
+
+### The measurement that decided criterion 1
+
+Criterion 1 required that Playwright attach CDP to the chosen mechanism against the actually-installed Brave binary, *verified empirically*. The concern was concrete: Chromium refuses `--remote-debugging-port` against its default user-data directory as an anti-cookie-theft guard, and Option A selects a profile inside exactly that directory — so Option A was expected to be incompatible with the CDP-attach approach ADR-0031 depends on. The owner pre-authorised falling back to Option B on that basis.
+
+`tools/browser-lab/test_cdp_attach.py` measured both, on the target machine, 2026-08-04:
+
+| Option | Result |
+|---|---|
+| A — `--profile-directory=Jarvis` | **CDP opened.** `Chrome/151.0.7922.71`, protocol 1.3 |
+| B — `--user-data-dir=<temp>` | **CDP opened.** Same build |
+
+The expectation was wrong. Brave 151 opens the port under both, so criterion 1 does not discriminate and Option A stands as chosen. The Option B fallback is not needed and is recorded here as a known-working alternative rather than a pending decision.
+
+The measurement is only valid with **no Brave instance already running**: a second `brave.exe` hands its command line to the existing instance and exits, so Option A would report "no port" whether the flag was refused or merely handed off. Any re-measurement must close Brave first.
+
+### What Option A costs, recorded rather than discovered later
+
+**Criterion 4 is not satisfied by construction, and this is the real price.** Option B would have placed the profile inside the vault, so a full data-deletion request (§14.2, NFR-025) would reach it automatically. Option A places it at `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Jarvis`, **outside the vault**. Two consequences follow, and both are now requirements rather than observations:
+
+1. **FR-057 "clear the Jarvis browser profile" must explicitly delete that directory.** It cannot be satisfied by deleting the vault.
+2. **Any full-data-deletion path must know the profile exists and remove it too**, or a user who asks Jarvis to delete everything will silently retain browser cookies and live sessions outside the vault.
+
+**Criterion 5 remains a required test, not an assumption.** Chromium profiles have separate cookie jars, so the `Jarvis` profile should not inherit the personal profile's sessions — but "should" is what criterion 5 exists to reject. P2-BRW-01 ships with a test that signs into a service in one profile and asserts the other is unauthenticated.
+
+### Login posture, decided with the same breath
+
+The owner asked whether the automation browser would carry their existing logins. It will not, and that is the point of FR-056. **Decided 2026-08-04: the isolated profile stands, and the owner signs into the `Jarvis` profile once for whichever services they want Jarvis to reach.** The profile is persistent, so this is a one-time action, and Option A makes it convenient because the profile appears in Brave's own profile switcher.
+
+The alternative — pointing automation at the personal `Default` profile — was considered and rejected. Phase 2 is the phase in which untrusted web content first reaches the planner, and browser automation executes as whoever the profile is authenticated as. Under `Default`, a successful injection acts against every service the user is signed into. Under `Jarvis`, it acts against only what the user deliberately granted. The Phase 2 exit criterion needs no login at all.
 
 ## Decision criteria
 
