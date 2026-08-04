@@ -106,9 +106,13 @@ class WakeWordConfig(_Base):
     #: global hook swallows the key from every other application, and F9 is
     #: heavily used by IDEs, spreadsheets and games.
     push_to_talk_hotkey: str = "F9"
-    #: ADR-0016: always-listening stays off until enrolment has been measured
-    #: and passed. Push-to-talk is the fallback until then.
-    always_listening: bool = False
+    #: On by default since 2026-08-04, and the reason is a measurement rather
+    #: than a preference. ADR-0016 held always-listening off "until enrolment
+    #: has been measured and passed"; Phase 1 acceptance measured it — no false
+    #: wakes across an extended period of ordinary conversation at the shipped
+    #: 0.6 threshold — so the condition that kept it off has been met.
+    #: Push-to-talk remains available, and this remains a switch.
+    always_listening: bool = True
     enrolled: bool = False
 
 

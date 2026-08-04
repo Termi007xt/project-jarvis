@@ -1,6 +1,6 @@
 # ADR-0019: Browser Profile Isolation
 
-- **Status:** **Accepted** (Option A, decided 2026-08-04 by the project owner)
+- **Status:** **Accepted — Option B** (superseded Option A on 2026-08-04, same day, after Option A failed in daily use; see "Revised" below)
 - **Date:** 2026-08-01, decided 2026-08-04
 - **Deciders:** Project owner
 - **Phase:** 2
@@ -30,9 +30,27 @@ Use `playwright.chromium.launch_persistent_context()` with Playwright's bundled 
 **Pros:** best-documented, most reliable Playwright automation surface — this is Playwright's native use case, with the fewest CDP-attachment surprises.
 **Cons:** directly contradicts §12.1's explicit "Dedicated persistent Brave profile" and `PROJECT_INPUTS.md`'s `dedicated_browser_profile: Jarvis` — the product has already committed to Brave specifically (plausibly for its ad/tracker-blocking defaults, which matter for a browser the agent controls), so silently substituting bundled Chromium would be a PRD deviation requiring its own justification.
 
+## Revised 2026-08-04 — Option A was tried and replaced by Option B
+
+Option A was chosen, built, and used. It failed in ordinary daily use, for a reason no test could have caught and the stage 0 measurement did not cover.
+
+**What happened.** The owner ran the Phase 2 exit criterion with their personal Brave already open. Jarvis opened YouTube *in their personal profile* and a blank tab in the Jarvis profile; the next attempt failed outright with "the browser did not open its automation port". Retrying eventually worked, then failed again later.
+
+**Why.** `--profile-directory` selects a profile inside the user's existing Brave user-data directory, and a Chromium user-data directory is served by **one browser process**. Launching Brave while the user's own Brave is running therefore does not start a new process at all — the command line is handed to the existing one, which opens a tab and exits. No debugging port is opened, because the process that would have opened it never started.
+
+This is a property of Chromium's single-instance model, not a defect in Jarvis, and it is not fixable within Option A. The stage 0 spike missed it because it correctly closed Brave first — which is exactly the condition that hides this failure.
+
+**Option B does not have the problem.** A separate `--user-data-dir` is a separate singleton, so it gets its own browser process and coexists with whatever the user has open. Stage 0 had already measured that CDP attaches under Option B.
+
+**Option B also satisfies criterion 4, which Option A could not.** The profile now lives in the vault (`<vault>/browser/brave-profile/`), so a full data-deletion request reaches it by construction (§14.2, NFR-025) instead of requiring FR-057 to remember a directory outside the vault. The requirement recorded below against Option A is therefore met structurally rather than by discipline.
+
+**What it costs.** The Jarvis profile no longer appears in Brave's own profile switcher, so signing it into a service means letting Jarvis open the browser and signing in there. Any logins already placed in the Option A profile do not carry over and must be redone once.
+
+The Option A analysis is kept below rather than deleted, because the reasoning that chose it was sound on the evidence available, and the evidence that overturned it — a person using the product normally — is worth recording as the thing that settled it.
+
 ## Decision
 
-**Option A — a dedicated `Jarvis` profile inside the existing Brave user-data directory, selected with `--profile-directory=Jarvis`.** Decided by the project owner on 2026-08-04.
+~~**Option A** — a dedicated `Jarvis` profile inside the existing Brave user-data directory, selected with `--profile-directory=Jarvis`.~~ **Superseded, same day, by Option B.** Original reasoning retained below.
 
 Option C was already ruled out by the existing commitment to Brave specifically. The choice between A and B was settled on two grounds: the owner's preference for the profile to be a first-class citizen of their own Brave installation, and a measurement that removed the only technical objection to it.
 

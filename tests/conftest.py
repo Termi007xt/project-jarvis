@@ -173,6 +173,12 @@ def core(vault: VaultPaths) -> Iterator[JarvisCore]:
             lock_file=vault.runtime_dir / "test.lock", force_lock_file=True
         ),
         enforce_single_instance=False,
+        # Real speech models take tens of seconds to load and are not what any
+        # test is checking. Worth recording *why* this is off rather than just
+        # that it is: switching it on made a latent scheduler/recovery race
+        # reproducible, so leaving it on would have let a start-up optimisation
+        # decide whether the suite was green.
+        preload_models=False,
     ).start()
     yield instance
     if instance.started:

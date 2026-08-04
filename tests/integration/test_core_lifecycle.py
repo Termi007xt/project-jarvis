@@ -173,6 +173,9 @@ def test_a_settings_change_is_audited_with_before_and_after(core: JarvisCore) ->
 # =========================================================================
 def test_an_interrupted_task_reappears_paused_and_is_not_resumed(vault) -> None:
     first = _new_core(vault).start()
+    # See the note in test_a_completed_task_is_never_re_run_after_recovery: a
+    # live scheduler dispatches this task itself and races the transition below.
+    first.scheduler.stop()
     task = first.tasks.create("Long job", "do a long thing", "system.health_check")
     first.tasks.transition(task.task_id, TaskState.QUEUED)
     first.tasks.transition(task.task_id, TaskState.RUNNING)
@@ -209,6 +212,12 @@ def test_recovery_releases_locks_orphaned_by_a_crash(vault) -> None:
 def test_a_completed_task_is_never_re_run_after_recovery(vault) -> None:
     """PRD NFR-011: no consequential action is repeated after a restart."""
     first = _new_core(vault).start()
+    # Stop the scheduler before hand-driving the task's state. `system.health_check`
+    # has a registered runner, so a live scheduler dispatches a QUEUED task itself
+    # and moves it to RUNNING — and then this test's own transition to RUNNING
+    # raises, intermittently, depending on which won. The product was right and
+    # the test was racing it; this test is about *recovery*, not dispatch.
+    first.scheduler.stop()
     task = first.tasks.create("Done", "goal", "system.health_check")
     first.tasks.transition(task.task_id, TaskState.QUEUED)
     first.tasks.transition(task.task_id, TaskState.RUNNING)
@@ -231,6 +240,8 @@ def test_a_clean_start_reports_nothing_to_recover(core: JarvisCore) -> None:
 
 def test_recovery_is_audited(vault) -> None:
     first = _new_core(vault).start()
+    # Third of the same family: a live scheduler dispatches this task itself.
+    first.scheduler.stop()
     task = first.tasks.create("Long job", "goal", "system.health_check")
     first.tasks.transition(task.task_id, TaskState.QUEUED)
     first.tasks.transition(task.task_id, TaskState.RUNNING)

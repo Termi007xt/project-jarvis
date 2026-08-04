@@ -117,6 +117,12 @@ class JarvisCore:
         approval_timeout_seconds: float | None = None,
         single_instance: SingleInstanceGuard | None = None,
         enforce_single_instance: bool = True,
+        #: Warm the speech models at start-up so the first command is not the
+        #: slow one. Off in tests: loading real models there costs tens of
+        #: seconds and, worse, the extra start-up work made a latent scheduler
+        #: race reproducible — a warm-up must not decide whether the suite is
+        #: green.
+        preload_models: bool = True,
         session_id: str | None = None,
     ) -> None:
         self.paths = (paths or VaultPaths.resolve()).ensure()
@@ -130,6 +136,7 @@ class JarvisCore:
         self._injected_approvals = approvals
         self._approval_timeout_seconds = approval_timeout_seconds
         self._enforce_single_instance = enforce_single_instance
+        self._preload_models = preload_models
         self._guard = single_instance or SingleInstanceGuard(
             lock_file=self.paths.runtime_dir / "single-instance.lock",
             force_lock_file=os.name != "nt",
@@ -305,6 +312,7 @@ class JarvisCore:
             )
         self.workers.start_all()
         self.scheduler.start()
+        self._start_model_warmup()
 
         self._started = True
         self.audit.record(
@@ -371,6 +379,39 @@ class JarvisCore:
             model=self.models.resolve(ModelRole.CONVERSATION).name,
         )
 
+    def _start_model_warmup(self) -> None:
+        """Warm the speech models in the background, off the start-up path.
+
+        The speech models load lazily, so the several-second wait landed on the
+        user's *first* command rather than on start-up. Warming them fixes where
+        the wait happens, not whether it happens.
+
+        On a background daemon thread on purpose: start-up must not block on a
+        model load, and a warm-up that fails must leave a working application
+        behind — the models still load on first use, just as slowly as before
+        (ADR-0010). It is therefore never awaited and never fatal.
+        """
+        import threading
+
+        if not self._preload_models:
+            return
+
+        def warm() -> None:
+            voice = getattr(self, "voice", None)
+            if voice is None:
+                return
+            outcome = voice.preload()
+            _LOG.info("model warm-up: %s", outcome)
+            self.audit.record(
+                AuditCategory.LIFECYCLE,
+                "preloaded speech models",
+                parameters=dict(outcome),
+            )
+
+        thread = threading.Thread(target=warm, name="jarvis-model-warmup", daemon=True)
+        thread.start()
+        self._warmup_thread = thread
+
     def _open_browser_session(self):
         """Open Brave on the dedicated Jarvis profile, attached over CDP.
 
@@ -390,13 +431,26 @@ class JarvisCore:
                 "Brave is not in the application catalogue, so there is no "
                 "approved browser to automate."
             )
-        # A copy carrying the profile flag; the catalogue entry itself is the
-        # user's and is not modified.
+
+        # ADR-0019 Option B, adopted 2026-08-04 after Option A collided with
+        # daily use: a profile *inside* the user's Brave data directory shares
+        # one browser process with their personal profile, so a launch made
+        # while their Brave was open was handed to that process and no
+        # automation port ever opened. A separate user-data directory gets its
+        # own process and coexists with whatever the user has open.
+        #
+        # It also puts the profile in the vault, which is what ADR-0019's
+        # criterion 4 asked for and Option A could not give: "delete all my
+        # data" now reaches the browser profile by construction (NFR-025).
+        profile_root = self.paths.root / "browser" / "brave-profile"
+        profile_root.mkdir(parents=True, exist_ok=True)
+
         automation_entry = replace(
             brave,
             app_id="brave_jarvis_profile",
             fixed_arguments=(
                 *brave.fixed_arguments,
+                f"--user-data-dir={profile_root}",
                 f"--profile-directory={DEDICATED_BROWSER_PROFILE}",
             ),
         )

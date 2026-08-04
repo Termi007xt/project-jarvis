@@ -76,7 +76,7 @@ audio:
     push_to_talk_enabled: true
     push_to_talk_hotkey: "F9"
     # Stays false until enrolment has been measured and passed (ADR-0016).
-    always_listening: false
+    always_listening: true
     enrolled: false
 
   speech_to_text:
