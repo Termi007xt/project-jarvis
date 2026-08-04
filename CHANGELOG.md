@@ -4,6 +4,24 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phase 2: deterministic desktop and browser automation
+
+In progress. Stage 0 (measure and unblock) is complete; no automation capability
+has shipped yet.
+
+### Changed
+
+- **Jarvis no longer claims it verified an application launch when it did not.**
+  Opening an application whose process was *already running* — most often Brave,
+  which almost everything opens through — now reports **unverified** rather than
+  success, and says why. This will read as a regression and is the opposite: the
+  old behaviour reported a confirmed success while observing nothing about its own
+  effect, which is how "Open YouTube Music" recorded `succeeded / verified` every
+  time it opened a browser tab instead of the app. Confirming these launches
+  properly needs to observe a *window*, which arrives with UI Automation later in
+  Phase 2. Until then Jarvis says it does not know, which by design does not
+  satisfy a task's success criteria (FR-048, AT-018).
+
 ## [0.2.0.dev0] — 2026-08-04 — Phase 1: voice-first local assistant
 
 **Phase 1 is closed.** All five PRD §21 exit criteria were met and confirmed by

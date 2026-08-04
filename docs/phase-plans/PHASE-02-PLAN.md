@@ -52,8 +52,19 @@ Phase 1 ran continuously to the phase end with no intermediate approval points,
 and its own record is blunt about the result: acceptance took six rounds, because
 defects compounded behind a green suite and nothing surfaced until the end.
 
-Phase 2 stops at each stage boundary for owner acceptance. The boundaries are not
-artificial — each produces something checkable by a human:
+**Revised 2026-08-04, at the owner's direction: checkpoints are recorded, not
+waited on.** At each stage boundary the work that needs a human is appended to
+`docs/PHASE-02-ACCEPTANCE-TESTING.md` — what to run, what should happen, what to
+report — and the next stage begins immediately. The owner is never a blocker and
+the phase never stalls waiting for a reply.
+
+This keeps what checkpoints are for and drops what the owner was right to worry
+about. The value was never the pause; it was that each stage produces something a
+human can check, written down while it is fresh, instead of one undifferentiated
+pile of claims at phase end. A stage boundary that writes its acceptance items to
+a durable document delivers that whether or not anyone reads it that day.
+
+The boundaries are not artificial — each produces something checkable by a human:
 
 | After stage | What the owner is asked to accept |
 |---|---|
@@ -66,7 +77,13 @@ artificial — each produces something checkable by a human:
 | 6 | Phase close: all seven exit criteria, plus §5.6 written for whatever this phase does not close |
 
 A stage is not accepted on a green suite. Each checkpoint names what a human must
-observe, in the manner of `docs/PHASE-01-ACCEPTANCE-TESTING.md`.
+observe, and writes it to **`docs/PHASE-02-ACCEPTANCE-TESTING.md`** — the running
+list, in the manner of `docs/PHASE-01-ACCEPTANCE-TESTING.md`. One document, one
+section per stage, appended as the phase proceeds.
+
+Items in that document are **not** closed by me. A stage's code can be finished
+while its acceptance items remain outstanding; the two are tracked separately, and
+the phase does not close until the outstanding list is empty.
 
 ### 2.2 Why checkpoints do not cost continuity
 

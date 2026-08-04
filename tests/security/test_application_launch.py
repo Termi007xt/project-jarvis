@@ -302,3 +302,74 @@ def test_process_detection_finds_a_process_that_is_really_running() -> None:
 
     assert process_running(("python.exe",)) or process_running(("pytest.exe",))
     assert not process_running(("definitely-not-a-real-process-12345.exe",))
+
+
+# =========================================================================
+# "Open YouTube Music opens a tab" — and reported verified success anyway
+# =========================================================================
+def _music_entry() -> "ApplicationEntry":
+    from jarvis.toolbox.launch import ApplicationEntry, ArgumentKind, LaunchKind
+
+    return ApplicationEntry(
+        app_id="youtube_music",
+        display_name="YouTube Music",
+        kind=LaunchKind.EXECUTABLE,
+        target=r"C:\Program Files\Brave\chrome_proxy.exe",
+        fixed_arguments=("--profile-directory=Default", "--app-id=abc123"),
+        argument_kind=ArgumentKind.NONE,
+        verify_process_names=("brave.exe",),
+    )
+
+
+def test_a_launch_is_not_verified_by_a_process_that_was_already_running(monkeypatch) -> None:
+    """The defect behind "Open YouTube Music opens a tab" reporting success.
+
+    `youtube_music` verifies against `brave.exe`. Brave is almost always already
+    running, so `process_running` returned true whether or not an app window ever
+    opened, and every launch recorded `succeeded / verified`. The audit log said
+    the effect was confirmed while nothing about the effect had been observed.
+
+    The rule this encodes: **a verification target must be able to distinguish
+    "my effect happened" from "something unrelated was already true."**
+    """
+    from jarvis.toolbox import launch as launch_module
+
+    monkeypatch.setattr(launch_module, "launch_argv", lambda argv: 4321)
+    # Running before the launch, and still running after it. Which is exactly
+    # what Brave looks like on a machine where the user already had it open.
+    monkeypatch.setattr(launch_module, "process_running", lambda names: True)
+
+    outcome = launch_module.launch(
+        _music_entry(), verify_timeout_seconds=0.2, poll_seconds=0.01
+    )
+
+    assert outcome.started, "the launch itself still happened"
+    assert not outcome.verified, (
+        "brave.exe was already running before this launch, so observing it "
+        "afterwards is not evidence that this launch did anything"
+    )
+    assert "already running" in outcome.detail.lower(), (
+        "the reason has to reach the user, not just the boolean"
+    )
+
+
+def test_a_launch_is_verified_when_the_process_appears_because_of_it(monkeypatch) -> None:
+    """The honest positive case must still work, or the fix is just pessimism."""
+    from jarvis.toolbox import launch as launch_module
+
+    observations: list[bool] = []
+
+    def fake_process_running(names: tuple[str, ...]) -> bool:
+        # Absent on the pre-launch check, present on every poll afterwards.
+        observations.append(True)
+        return len(observations) > 1
+
+    monkeypatch.setattr(launch_module, "launch_argv", lambda argv: 999)
+    monkeypatch.setattr(launch_module, "process_running", fake_process_running)
+
+    outcome = launch_module.launch(
+        _music_entry(), verify_timeout_seconds=2.0, poll_seconds=0.01
+    )
+
+    assert outcome.started and outcome.verified
+    assert outcome.pid == 999

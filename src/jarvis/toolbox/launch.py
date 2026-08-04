@@ -339,6 +339,17 @@ def launch(
     process is actually observed.
     """
     argv = build_argv(entry, argument)
+
+    # Observed *before* starting anything, because otherwise this check cannot
+    # tell "my effect happened" from "something unrelated was already true".
+    # `youtube_music` verifies against `brave.exe`, and Brave is usually already
+    # open, so every launch reported verified success while nothing about the
+    # effect had been observed — including the launches that opened a tab
+    # instead of the app.
+    already_running = bool(entry.verify_process_names) and process_running(
+        entry.verify_process_names
+    )
+
     try:
         pid = launch_argv(argv)
     except OSError as exc:
@@ -354,6 +365,23 @@ def launch(
             detail=(
                 f"started {entry.display_name}, but the catalogue entry declares "
                 "no process to verify against, so the effect is unconfirmed."
+            ),
+        )
+
+    if already_running:
+        # Honest, and deliberately not downgraded to a warning: this launch
+        # cannot be confirmed by process presence, because the process was
+        # there first. Confirming it needs a *window*, which is UI Automation
+        # (P2-WIN-08). Until then this is `unverified`, which by design does
+        # not satisfy a task's success criteria (PRD FR-048, AT-018).
+        return LaunchOutcome(
+            started=True, verified=False, pid=pid, argv=argv,
+            detail=(
+                f"{entry.display_name} was asked to start, but "
+                f"{', '.join(entry.verify_process_names)} was already running "
+                "before this action, so seeing it now is no evidence the action "
+                "did anything. Reporting this as unverified rather than as "
+                "success."
             ),
         )
 
