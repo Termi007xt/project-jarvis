@@ -44,6 +44,29 @@ Decided with the project owner on 2026-08-04, before implementation:
 | Search provider | **Option A** — visible Brave search only. No API-key path, so §18.3 becomes impossible to violate rather than merely enforced | ADR-0018 |
 | Browser attach mechanism | **CDP connect to our own launch.** Playwright is a client, never a launcher | §4, ADR-0031 |
 | Phase 1 leftovers | YouTube Music app-id pulled into stage 0 (same question as ADR-0019); time/date tool deferred to stage 6 | §5 |
+| Sequencing | **Checkpoint after each stage.** Not the continuous run Phase 1 used | §2.1 |
+
+### 2.1 Checkpoints
+
+Phase 1 ran continuously to the phase end with no intermediate approval points,
+and its own record is blunt about the result: acceptance took six rounds, because
+defects compounded behind a green suite and nothing surfaced until the end.
+
+Phase 2 stops at each stage boundary for owner acceptance. The boundaries are not
+artificial — each produces something checkable by a human:
+
+| After stage | What the owner is asked to accept |
+|---|---|
+| 0 | The CDP measurement, the four ADRs, and the YouTube Music diagnosis. Whether stage 3 is built against ADR-0019 Option A or Option B is decided here, on evidence |
+| 1 | That a hostile fixture page cannot influence a tool call. Reviewed **before** any code can fetch a real page |
+| 2 | That real mouse movement pauses a real automation task, and that the foreground lock is held before anything moves |
+| 3 | The exit criterion, run by the owner against the real YouTube — two utterances, not a fixture |
+| 4 | Close-before-force, the capture indicator, and two windows placed across monitors |
+| 5 | "Open Downloads and open my latest resume PDF", including the ambiguous case |
+| 6 | Phase close: all seven exit criteria, plus §5.6 written for whatever this phase does not close |
+
+A stage is not accepted on a green suite. Each checkpoint names what a human must
+observe, in the manner of `docs/PHASE-01-ACCEPTANCE-TESTING.md`.
 
 ---
 
