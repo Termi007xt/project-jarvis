@@ -144,6 +144,65 @@ def test_a_detection_while_silent_is_never_second_guessed() -> None:
     )
 
 
+# -- the acceptance outcome: half duplex, honestly -------------------------
+# User acceptance, 2026-08-04: "8.3 interrupting doesn't work". ADR-0028 named
+# this outcome in advance and named the response — pause detection while
+# speaking and say so in the GUI (NFR-014) — rather than leaving a full-duplex
+# claim standing that a real room had just disproved. FR-015 permits exactly
+# this for Phase 1 and asks only for a hotkey, which works.
+def test_the_shipped_duplex_mode_is_half() -> None:
+    from jarvis.audio.duplex import DuplexMode
+    from jarvis.audio.service import configured_duplex_mode
+
+    class _Audio:
+        duplex_mode = "half"
+
+    class _Config:
+        audio = _Audio()
+
+    assert configured_duplex_mode(_Config()) is DuplexMode.HALF
+
+
+def test_full_duplex_can_still_be_turned_back_on() -> None:
+    from jarvis.audio.duplex import DuplexMode
+    from jarvis.audio.service import configured_duplex_mode
+
+    class _Audio:
+        duplex_mode = "full"
+
+    class _Config:
+        audio = _Audio()
+
+    assert configured_duplex_mode(_Config()) is DuplexMode.FULL
+
+
+def test_an_unreadable_setting_degrades_rather_than_over_claiming() -> None:
+    """Failing towards "you cannot interrupt me" is the honest direction."""
+    from jarvis.audio.duplex import DuplexMode
+    from jarvis.audio.service import configured_duplex_mode
+
+    assert configured_duplex_mode(object()) is DuplexMode.HALF
+    assert configured_duplex_mode(None) is DuplexMode.HALF
+
+
+def test_half_duplex_says_you_cannot_interrupt_by_voice() -> None:
+    from jarvis.audio.duplex import DuplexMode
+
+    description = DuplexCoordinator(mode=DuplexMode.HALF).describe_interruption(
+        listening=True, hotkey="Ctrl+Alt+End"
+    )
+    assert "cannot interrupt by voice" in description
+    assert "Ctrl+Alt+End" in description
+
+
+def test_half_duplex_does_not_promise_a_measurement_it_lacks() -> None:
+    from jarvis.audio.duplex import DuplexMode
+
+    coordinator = DuplexCoordinator(mode=DuplexMode.HALF)
+    coordinator.playback_started("speaking")
+    assert not coordinator.detection_enabled()
+
+
 # -- what the Voice screen is allowed to claim ------------------------------
 def test_it_does_not_claim_you_can_interrupt_with_the_microphone_closed() -> None:
     """Full duplex plus a closed microphone is not an interruptible Jarvis."""

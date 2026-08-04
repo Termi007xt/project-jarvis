@@ -57,6 +57,15 @@ audio:
   # A typed request is never answered aloud, whatever this says.
   speak_replies: when_useful
 
+  # half - wake detection pauses while Jarvis speaks, so it cannot be
+  #        interrupted by voice. FR-015 permits this for Phase 1, and user
+  #        acceptance on 2026-08-04 found voice interruption did not work on
+  #        this hardware, so claiming otherwise would be false (ADR-0028).
+  # full  - the microphone stays live while speaking; needs the self-trigger
+  #         rate measured before it can be relied upon.
+  # Ctrl+Alt+End and the tray's "Stop speaking" work in either mode.
+  duplex_mode: half
+
   wake_word:
     provider: openwakeword
     # ADR-0016 Path 1 layers a personal verifier on a pretrained base model, and

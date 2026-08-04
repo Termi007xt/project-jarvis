@@ -453,3 +453,76 @@ in its output. A suite that reports "all passed" and returns `0xC0000374` is
 telling you something, and the summary line is not where it says it.
 
 **Suite after this round: 907 passed, 2 skipped** (was 832).
+
+---
+
+## 13. Phase 1 closed — user acceptance, 2026-08-04
+
+The owner ran `docs/PHASE-01-ACCEPTANCE-TESTING.md` and accepted the phase.
+Sections not explicitly reported were accepted as behaving as documented.
+
+### 13.1 Exit criteria (PRD §21)
+
+All five met.
+
+| Criterion | Result |
+|---|---|
+| Wake phrase reliably starts a command | **Met** on the configured fallback "Hey Jarvis". **No false wakes** over an extended period of ordinary conversation — the measurement that had been outstanding since the model was installed |
+| Converse locally | **Met** |
+| Open Brave, YouTube, YouTube Music, Xbox, Sea of Thieves | **Met.** YouTube Music opens as a browser tab rather than the installed app; the criterion is that it opens |
+| Stop listening and stop all automation | **Met** |
+| No network in offline mode | **Met** |
+
+### 13.2 What did not pass, and what was done about it
+
+**Voice interruption does not work (section 8.3).** Reported after the same-day
+repair of the two defects that had made acoustic barge-in unreachable by
+construction, so the remaining failure belongs to this microphone, these
+speakers and this room rather than to the arithmetic.
+
+The owner deferred investigating it. Deferring the *investigation* is not the
+same as leaving a false claim standing, so `audio.duplex_mode` now ships as
+`half`: wake detection pauses while Jarvis speaks and the Voice screen says you
+cannot interrupt by voice. This is precisely the degradation ADR-0028 wrote
+down in advance — *"the honest fallback is half-duplex... and say so in the GUI
+(NFR-014)"* — and FR-015 permits it in as many words for Phase 1, asking only
+for a hotkey, which works. Recorded as the second amendment to ADR-0028, where
+the reversal of that ADR's central choice belongs.
+
+**"Open YouTube Music" still opens a tab (section 5).** The app-id vector is
+correct and unit-tested, and it is the one the Start-menu shortcut uses, so the
+launch is reaching Brave and Brave is not honouring it — most likely the profile
+directory or the app id itself differs from what the shortcut records. Deferred
+by the owner; carried in `docs/BACKLOG.md` §4.6 rather than closed.
+
+**Startup entry is named `pythonw.exe` (section 10).** It appeared and
+disappeared correctly. The name is the honest one for a source checkout: there
+is no packaged executable to name until Phase 6 (ADR-0013, ADR-0022).
+
+### 13.3 What this phase actually cost, and what it taught
+
+Six acceptance rounds, not one. Every round found defects that a green test
+suite had not: the Conversation screen that replied to nothing, the Voice screen
+where no control was connected, `voice.speak` reporting verified success into a
+silent room, an emergency-stop hotkey that had never once fired, a microphone
+that could not open on the host API most machines default to, and a barge-in
+whose two defences were a closed door and a meaningless comparison.
+
+The through-line is one thing: **the tests tested units, and the product is
+seams.** `tests/ui/test_conversation_screen.py` passed in full against a screen
+that did nothing at all. The wiring tests added in response assert a rule rather
+than a behaviour — an enabled control either does something or says why it
+cannot — and that rule is what caught the rest.
+
+The second lesson is narrower and cost a whole round: **a constant that is
+wrong looks suspicious, and a comparison that is meaningless does not.** The
+1.6 multiplier reads as a tuning question. Comparing a microphone level against
+the RMS of our own output samples reads as a sensible echo heuristic, and is
+not a comparison at all. Only running it in a real room found that.
+
+The third is mechanical and worth keeping: **read the exit code, not the
+summary line.** A UI suite reported every assertion passing and returned
+`0xC0000374`.
+
+**Final state: 916 passed, 2 skipped** (Phase 0 baseline 386). Seven tools
+registered, all six Phase 1 stages delivered, `--check` clean.

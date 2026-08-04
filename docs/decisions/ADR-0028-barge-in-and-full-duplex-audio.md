@@ -164,3 +164,50 @@ listening turned on — a precondition that was not stated anywhere and is now
 part of what the Voice screen reports.
 
 Tests: `tests/unit/test_interruption.py`, `tests/ui/test_stop_speaking.py`.
+
+---
+
+## Amendment — 2026-08-04 (second): degraded to half duplex on the acceptance result
+
+**Status:** Accepted. This ADR's central choice is **reversed for Phase 1**.
+
+The original decision took full duplex over the half-duplex shortcut FR-015
+permits, and named the condition for backing out: *"If the measured
+self-trigger rate is unacceptable, the honest fallback is half-duplex — pause
+detection while speaking — **and say so in the GUI** (NFR-014). That path is
+implemented here as `set_duplex_mode`, not assumed unnecessary."*
+
+User acceptance testing on 2026-08-04 reported it plainly: **"8.3 interrupting
+doesn't work."** That is on top of the same-day repair of the two defects that
+had made acoustic barge-in unreachable by construction, so the remaining
+failure is a property of this microphone, these speakers and this room rather
+than of the arithmetic.
+
+`audio.duplex_mode` therefore ships as `half`. Wake detection pauses while
+Jarvis speaks, `describe_interruption` says "you cannot interrupt by voice",
+and nothing in the product claims a capability a real room has disproved.
+Setting it to `full` restores the previous behaviour for anyone who wants to
+measure it; the code is unchanged and still tested.
+
+**This is not a Phase 1 exit-criteria failure.** FR-015 reads: *"Phase 1 may
+pause wake detection while Jarvis is speaking. A later phase shall support
+'Jarvis stop' or a global hotkey to interrupt speech and automation."* The
+hotkey exists and works — `Ctrl+Alt+End`, plus **Stop speaking** in the tray —
+so the requirement is met by the route the PRD actually asked for. Full duplex
+was this ADR's ambition, not the PRD's demand, and the ambition is what has
+been withdrawn.
+
+### Why the ambition was still worth having
+
+The architecture it forced is the part that survives: capture that does not
+stop for playback, a coordinator that knows when Jarvis is speaking, a playback
+loop that checks for an interruption between blocks, and a barge-in that is
+carefully *not* an emergency stop. Restoring full duplex is now a
+configuration change plus a measurement, not a rewrite — which is exactly what
+the ADR argued for in choosing it in Phase 1 rather than Phase 4.
+
+### Revisit when
+
+Someone measures the self-trigger rate on real hardware with `duplex_mode: full`,
+or Phase 2's foreground-control work provides a better acoustic reference
+signal than the capture stream alone.

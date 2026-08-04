@@ -210,6 +210,11 @@ class AudioConfig(_Base):
     #: "when_useful" answers questions and reports problems, and marks a
     #: finished instruction with a cue instead of narrating it.
     speak_replies: Literal["always", "when_useful", "never"] = "when_useful"
+    #: "half" pauses wake detection while Jarvis speaks, so it cannot be
+    #: interrupted by voice — which FR-015 explicitly permits for Phase 1, and
+    #: which user acceptance on 2026-08-04 showed to be the truth on this
+    #: hardware. `Ctrl+Alt+End` and the tray's Stop speaking are unaffected.
+    duplex_mode: Literal["half", "full"] = "half"
 
 
 class DefaultPermissionPolicy(_Base):

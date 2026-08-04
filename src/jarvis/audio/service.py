@@ -28,9 +28,24 @@ from jarvis.audio.wake import build_wake_detector, wake_model_path
 from jarvis.core.audit.log import AuditLog
 from jarvis.core.audit.models import AuditCategory
 
-__all__ = ["VoiceService", "VoiceStatus", "SpokenResult"]
+__all__ = ["VoiceService", "VoiceStatus", "SpokenResult", "configured_duplex_mode"]
 
 _LOG = logging.getLogger(__name__)
+
+
+def configured_duplex_mode(config: object) -> DuplexMode:
+    """Read ``audio.duplex_mode``, degrading rather than over-claiming.
+
+    Anything unreadable resolves to half duplex. The two failure directions are
+    not symmetrical: claiming Jarvis can be interrupted when it cannot leaves
+    the user talking at a machine that is not listening, while claiming it
+    cannot when it can costs them one press of a key that also works.
+    """
+    audio = getattr(config, "audio", None)
+    value = getattr(audio, "duplex_mode", None)
+    if isinstance(value, str) and value.strip().lower() == DuplexMode.FULL.value:
+        return DuplexMode.FULL
+    return DuplexMode.HALF
 
 
 @dataclass(frozen=True)
@@ -99,7 +114,7 @@ class VoiceService:
         self.pipeline = VoicePipeline(
             wake_detector=self.wake,
             stt=self.stt,
-            duplex=DuplexCoordinator(),
+            duplex=DuplexCoordinator(mode=configured_duplex_mode(config)),
             vad=VoiceActivityDetector(),
             ring_buffer=RingBuffer(),
             phrase=wake_settings.phrase,

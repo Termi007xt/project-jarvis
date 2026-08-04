@@ -4,7 +4,12 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Phase 1: voice-first local assistant
+## [0.2.0.dev0] — 2026-08-04 — Phase 1: voice-first local assistant
+
+**Phase 1 is closed.** All five PRD §21 exit criteria were met and confirmed by
+user acceptance testing on 2026-08-04. What it did *not* close is listed under
+Known limitations below and carried into Phase 2 in `docs/BACKLOG.md` §4.6 —
+none of it silently.
 
 Jarvis can now hold a conversation, hear you, speak back, and open the handful
 of applications and websites you have approved. It still performs **no other
@@ -166,16 +171,23 @@ touching your files.
   pretrained "Hey Jarvis" model is measured and working; per-user enrolment is
   not built, and ADR-0016 does not permit always-listening without it.
   Single-word "Jarvis" is not detected — measured 0 of 4 attempts.
-- **Barge-in is unproven on real hardware.** Interrupting Jarvis by voice now
-  has thresholds that can actually be met, but the rate at which it mistakes its
-  own voice for yours has still not been measured, so it should not yet be
-  relied upon. It also needs the microphone open, which means listening turned
-  on. `Ctrl+Alt+End` and the tray's **Stop speaking** work in every state and
-  are the routes to trust until that measurement exists.
+- **You cannot interrupt Jarvis by speaking.** Acceptance testing found voice
+  interruption did not work on real hardware even after the thresholds that
+  made it unreachable were repaired, so Jarvis ships in **half duplex**: wake
+  detection pauses while it speaks, and the Voice screen says so rather than
+  claiming otherwise. `Ctrl+Alt+End` and the tray's **Stop speaking** stop it
+  immediately and always. `audio.duplex_mode: full` restores the other
+  behaviour for anyone who wants to measure it.
+- **"Open YouTube Music" still opens a browser tab** rather than the installed
+  web app, despite launching by app id. Under investigation.
 - **Jarvis has no clock.** It can only answer "what time is it?" from the model,
   which does not know. There is no time tool yet.
 - **Only catalogued applications can be opened.** Naming one that is not in the
   catalogue is refused, and there is no in-application way to add one.
+- **Jarvis does not speak while it works**, only when it finishes.
+- **"Start at sign-in" appears as `pythonw.exe`** in Windows' startup list.
+  Correct for a source checkout — there is no packaged executable to name until
+  Phase 6.
 
 ---
 

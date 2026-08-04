@@ -2,34 +2,42 @@
 
 ## Snapshot
 - **Last updated:** 2026-08-04
-- **Current branch:** `feat/PHASE-1-development`
-- **HEAD commit:** `40fd50c` + uncommitted voice-behaviour fixes (round 6)
-- **Active phase:** **Phase 1 — in user acceptance testing, round 6**
-- **Overall status:** Amber, improving. `python -m pytest` → **907 passed,
-  2 skipped** (Phase 0 baseline 386; 698 → 745 → 832 → 907). Nothing is blocked.
+- **Current branch:** `feat/PHASE-1-development` — ready to merge
+- **Version:** `0.2.0.dev0`
+- **Active phase:** **Phase 1 — CLOSED, accepted by the owner 2026-08-04**
+- **Next phase:** **Phase 2 — deterministic desktop and browser automation**,
+  not started. `docs/BACKLOG.md` §5 is the plan.
+- **Overall status:** Green. `python -m pytest` → **916 passed, 2 skipped**
+  (Phase 0 baseline 386; 698 → 745 → 832 → 907 → 916). Nothing is blocked.
 
-**Acceptance testing is running as rounds against real use**, each one reporting
-defects that the unit suites did not catch. Rounds 1–5 are recorded in
-`docs/phase-reports/PHASE-01-VOICE-FIRST.md` sections 10 and 11. Round 6
-(2026-08-04) came from the owner's own list and covered four things:
+### Phase 1 is accepted
 
-1. **Emoji and formatting were being read out** — the phonemiser expands every
-   character to its Unicode name, so "🦁" was spoken as "lion face".
-   `speakable_text()` strips presentation before synthesis, and runs before
-   redaction so markdown cannot hide a credential from the FR-034 patterns.
-2. **Jarvis could not be interrupted**, for three independent reasons: an
-   unreachable raised threshold (0.96 required), a self-echo test comparing a
-   microphone level against our own output samples, and an emergency stop that
-   never stopped speech. See the ADR-0028 amendment of 2026-08-04.
-3. **It narrated instructions that spoke for themselves.** `audio.speak_replies`
-   and `jarvis.audio.reply_policy` decide speak / cue / silent in code —
-   deliberately not asked of the model, because that drift is invisible.
-4. **"Open YouTube Music" opened a browser tab** rather than the installed web
-   app. One catalogue entry, launched by app id; no new call site, so ADR-0029
-   is untouched.
+All five PRD §21 exit criteria met, confirmed by user acceptance on 2026-08-04.
+The full record is `docs/phase-reports/PHASE-01-VOICE-FIRST.md` §13; the items
+it did **not** close are carried explicitly in `docs/BACKLOG.md` §4.6.
 
-The owner's decision on the fifth item is recorded below: opening arbitrary
-applications with first-use permission is **deferred**, not declined.
+Two acceptance findings did not pass and were handled rather than waved through:
+
+- **Voice interruption does not work on this hardware.** The owner deferred
+  investigating it. Deferring the investigation is not the same as leaving a
+  false claim standing, so `audio.duplex_mode` ships as `half` — the
+  degradation ADR-0028 named in advance, and the behaviour FR-015 permits in as
+  many words for Phase 1. `Ctrl+Alt+End` and the tray's **Stop speaking** work.
+- **"Open YouTube Music" opens a tab, not the installed app**, despite a
+  correct and tested app-id vector. Deferred by the owner, carried in §4.6.
+
+**Acceptance took six rounds, not one.** Each round found defects a green suite
+had not, because the tests tested units and the product is seams. That is the
+lesson worth carrying into Phase 2, where the seams get considerably wider.
+
+### What the owner decided, and what is therefore not open
+
+- **Arbitrary application launching with first-use permission: deferred, not
+  declined** ("stability first", 2026-08-04). It needs its own ADR before any
+  code — see §4.6 and Next Exact Steps.
+- **ADR-0029 is not to be broadened.** One process-creation call site, one
+  allow-list entry. Progressive web apps and Start-menu discovery both fit
+  inside it as fixed argument vectors; neither is a reason to widen it.
 
 **The lesson, recorded so it changes behaviour:** every unit passed while the
 product did not work, because nothing tested the *seam* between the GUI and the
@@ -124,28 +132,31 @@ that change what the product can do:
 
 ## In Progress
 
-Nothing is part-built. The phase is code complete and awaiting user acceptance
-testing — see `docs/PHASE-01-ACCEPTANCE-TESTING.md`.
+Nothing. Phase 1 is closed and accepted; Phase 2 has not started.
 
 ## Blocked or Failing
 
-Nothing is blocked and no test is failing. The three items recorded here earlier
-in the phase have all been resolved: ADR-0029 was accepted, the audio stack was
-installed as the optional `voice` extra, and the wake-word model was obtained.
+Nothing is blocked and no test is failing.
 
-**What is unproven rather than blocked** — the distinction matters:
+**Known defects carried into Phase 2** — all in `docs/BACKLOG.md` §4.6, none of
+them silent in the product:
 
-1. **The false-wake rate is unmeasured.** Wake detection has been exercised by
-   hand but not counted over a normal hour of talking, which is what decides the
-   threshold and whether always-listening is safe to leave on.
-2. **Barge-in self-trigger rate is unmeasured**, which ADR-0028 makes the gate
-   on relying on it. Until 2026-08-04 it could not have been measured at all —
-   the thresholds made acoustic barge-in unreachable. The honest half-duplex
-   fallback is implemented for if it proves unreliable, and the keyboard routes
-   do not depend on the measurement.
-3. **The Xbox and Sea of Thieves AUMIDs are unverified.** They build the correct
-   broker vector, but launching them would open windows on the user's desktop,
-   so it belongs in acceptance testing.
+1. **Voice interruption does not work on real hardware.** Shipped as
+   `duplex_mode: half`, which the GUI states plainly. Needs a measurement, not
+   a rewrite: set `full` and count self-triggers.
+2. **"Open YouTube Music" opens a browser tab.** The app-id vector matches the
+   Start-menu shortcut and is unit-tested, so Brave is receiving it and not
+   honouring it — most likely the profile directory or the app id differs from
+   what the shortcut records.
+3. **No time or date capability.** The most obvious thing to ask a voice
+   assistant, answerable only from a model that cannot know.
+4. **Progress speech (FR-033) and spoken notifications by event type (FR-181)**
+   are not built. Both matter more once Phase 2 has work long enough to report
+   progress on.
+
+**Resolved during acceptance:** the false-wake rate — no false wakes over an
+extended period of ordinary conversation, so the shipped 0.6 threshold stands
+and always-listening is safe to offer as a switch.
 
 ## Tests and Quality Checks
 - **Last successful:** `python -m pytest` → **907 passed, 2 skipped** (2026-08-04).
@@ -233,46 +244,51 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-1. **The false-wake count.** Listening on, an hour of normal talking, how many
-   times did it wake by mistake? This is the outstanding measurement and it
-   decides two things: whether the 0.6 threshold stays, and whether
-   always-listening is safe to leave on — which is also the precondition for
-   acoustic barge-in, since a closed microphone cannot hear an interruption.
+**Phase 1 is closed. Start here, in a new session.**
 
-2. **Measure barge-in self-triggering**, now that the thresholds can actually be
-   met. ADR-0028 makes this the gate on relying on barge-in. If the rate is
-   unacceptable, degrade to half-duplex and say so in the GUI — that path is
-   implemented, not assumed unnecessary. Until then the keyboard routes
-   (`Ctrl+Alt+End`, tray **Stop speaking**) are the ones to trust, and the Voice
-   screen says exactly that.
+1. **Merge `feat/PHASE-1-development` into `main`.** The branch is accepted, the
+   suite is green and the documentation is current. Nothing on it is in flight.
 
-3. **A time tool.** "What time is it?" can currently only be answered by the
-   model, which does not know. It is the most obvious thing to ask a voice
-   assistant and the answer is a small, verifiable tool.
+2. **Read `docs/BACKLOG.md` §5** — Phase 2, deterministic desktop and browser
+   automation. Its exit criterion *"Search RTX 5070 on YouTube and play the
+   second video"* is the shape of the whole phase: UI Automation before
+   coordinates, DOM selectors before pixels, and a foreground-control lock
+   acquired before anything moves.
 
-4. **Arbitrary application launching with first-use permission** — deferred by
-   the owner on 2026-08-04 ("stability first"), not declined. It needs its own
-   ADR before any code: Start-menu discovery as the source of executables
-   (machine state, never model output), an approval on first use, persisted
-   entries, a `.lnk` parser that runs no shortcut, and care around the
-   `powershell.exe` entry every Start menu contains. ADR-0029 constraint 3 is
-   preserved by construction — the model still names an *entry*, never a binary.
-   Progressive web apps come free with it: they are ordinary fixed vectors.
+3. **Expect the prompt-injection defence to get its first real exercise.**
+   Phase 2 is where untrusted content — web pages, search results, page titles —
+   first enters the system. The rule is already written and already tested in
+   principle: web content can inform a plan, it can never authorise a
+   capability. Phase 2 is where that stops being theoretical.
 
-5. **Per-user wake enrolment (ADR-0016 Path 1).** The measurement types,
-   threshold fitting and quality bar exist and are tested; the recording flow
-   and the personal verifier do not.
+4. **Two small Phase 1 leftovers worth doing early**, because both are cheap and
+   both are visible every day: **a time/date tool**, and the **YouTube Music
+   app-id** defect. Neither is architectural.
 
-Phase 1 exit criteria are in `docs/BACKLOG.md` §4 and PRD §21. Of the five:
-"no network in offline mode" and "stop listening and stop all automation" are
-met and tested; "converse locally" is met for text; and the wake-phrase and
-application-launch criteria are **built and unit-verified but not yet proven by
-a human**, which is exactly what acceptance testing settles.
+5. **The application-catalogue ADR**, when stability allows. Start-menu
+   discovery as the executable source (machine state, never model output),
+   approval on first use, persisted entries, a `.lnk` parser that runs nothing,
+   and care around the `powershell.exe` shortcut every Start menu contains.
+   ADR-0029 constraint 3 survives by construction: the model still names an
+   *entry*, never a binary. Progressive web apps come free with it.
+
+### Carry these habits into Phase 2
+
+- **Test the seam, not just the unit.** Six acceptance rounds all found the same
+  class of defect: components that worked, connected to nothing. The rule that
+  caught them is worth restating — an enabled control either does something or
+  says why it cannot.
+- **Read the exit code.** A UI suite reported every assertion passing and
+  returned `0xC0000374`.
+- **Write the test named after the defect**, in the words the defect was
+  reported in. Every regression test added this phase is readable as an account
+  of what went wrong.
 
 ## Uncommitted or Temporary State
-Phase 1 work is in progress on `feat/PHASE-1-development`, branched from
-`df4a35b`. Nothing is stubbed to report false success; every unbuilt screen and
-menu entry still names its phase (ADR-0010).
+Nothing uncommitted. Phase 1 is complete on `feat/PHASE-1-development`, branched
+from `df4a35b`, and the branch is ready to merge into `main`. Nothing is stubbed
+to report false success; every unbuilt screen and menu entry still names its
+phase (ADR-0010).
 
 No temporary migrations or compatibility shims. No process needs to be running;
 Ollama is optional. `tools/voice-lab/` and `tools/qwen-tts-lab/` are research
