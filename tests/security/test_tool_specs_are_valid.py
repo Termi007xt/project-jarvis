@@ -48,6 +48,61 @@ def test_speaking_takes_the_speaker_lock(core) -> None:
     assert SpeakTool.spec.resource_locks == ("speaker_output",)
 
 
+# -- Phase 2: nothing moves without owning the desktop ----------------------
+#: Capabilities that drive the physical desktop. A tool holding one of these can
+#: move the pointer, press keys, or act inside a browser that has the user's
+#: focus — so it must own `foreground_desktop` first (FR-077, PRD §7.1).
+INPUT_OWNING_CAPABILITIES = frozenset(
+    {
+        "input.automate",
+        "browser.automate_logged_in",
+    }
+)
+
+
+def test_a_tool_that_moves_anything_must_own_the_desktop_first(core) -> None:
+    """FR-077, and the Phase 2 rule that must not be retrofitted.
+
+    Two tasks driving the mouse at once produce garbage that is very hard to
+    diagnose afterwards, and a tool that takes input without the lock also
+    cannot be paused by the user-interruption path (FR-078, AT-008), because
+    that path works by refusing to hand the lock over.
+
+    This is asserted against the declaration rather than the implementation on
+    purpose. `voice.speak` proves the point: its *behaviour* was correct and its
+    *declaration* named a lock that did not exist, and nothing noticed until a
+    human tried to use it.
+    """
+    from jarvis.tasks.locks import FOREGROUND_DESKTOP
+
+    for spec in registered_specs(core):
+        owning = INPUT_OWNING_CAPABILITIES & set(spec.required_capabilities)
+        if not owning:
+            continue
+        assert FOREGROUND_DESKTOP in spec.resource_locks, (
+            f"{spec.tool_id} declares {sorted(owning)} but does not take the "
+            f"'{FOREGROUND_DESKTOP}' lock. Anything that drives the pointer or "
+            "keyboard must own the desktop first, or two tasks will fight over "
+            "it and the user cannot interrupt either (FR-077, FR-078)."
+        )
+
+
+def test_the_input_owning_capabilities_are_real() -> None:
+    """Guard against this rule quietly becoming vacuous.
+
+    If a capability here were renamed in the catalogue and not here, the check
+    above would silently match nothing and keep passing — a green test asserting
+    an empty set, which is the failure mode this project keeps meeting.
+    """
+    from jarvis.core.permissions.catalogue import CAPABILITIES
+
+    unknown = INPUT_OWNING_CAPABILITIES - set(CAPABILITIES)
+    assert not unknown, (
+        f"{sorted(unknown)} are not in the capability catalogue, so the "
+        "desktop-ownership rule matches nothing and proves nothing"
+    )
+
+
 def test_every_tool_can_be_invoked_without_a_contract_error(core) -> None:
     """The invoker validates locks before doing anything. Prove it passes."""
     from jarvis.core.tools.invoker import ToolCall
