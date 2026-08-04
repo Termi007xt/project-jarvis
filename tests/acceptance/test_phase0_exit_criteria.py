@@ -314,15 +314,69 @@ def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> Non
     banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
     for path in package.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
+        # Module scope only, deliberately not `ast.walk` — same reasoning, and
+        # the same implementation, as
+        # `tests/security/test_lazy_audio_imports.py`. Phase 2 legitimately uses
+        # pywinauto and playwright behind the `automation` extra, exactly as
+        # Phase 1 uses the voice stack behind the `voice` extra, and a lazy
+        # import inside a function is what makes that work. Scanning the whole
+        # tree would have banned the sanctioned pattern along with the
+        # unsanctioned one, which is stricter than this test's own stated rule.
+        scoped: list[ast.AST] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                scoped.append(node)
+            elif isinstance(node, ast.If):
+                # A module-level `if` (a TYPE_CHECKING guard, say) still runs.
+                scoped.extend(ast.walk(node))
+
+        for node in scoped:
             names: list[str] = []
             if isinstance(node, ast.Import):
                 names = [alias.name.split(".")[0] for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module.split(".")[0]]
             assert not (set(names) & banned_imports), (
-                f"{path.name} imports a computer-control library: {set(names) & banned_imports}"
+                f"{path.name} imports a computer-control library at module "
+                f"scope: {set(names) & banned_imports}. Import it inside the "
+                "function that needs it, so the engine still imports on Linux "
+                "with nothing installed (ARCHITECTURE §11)."
             )
+
+
+def test_the_computer_control_scanner_still_catches_a_violation() -> None:
+    """A scan that was just narrowed must be shown to still detect something.
+
+    The check above was widened from "any import anywhere" to "any import at
+    module scope" when Phase 2 gave pywinauto a legitimate lazy use. A narrowing
+    that goes too far produces a test that passes because it inspects nothing,
+    which is the failure mode this project keeps meeting — so this proves the
+    scanner still bites, and that the sanctioned pattern still passes.
+    """
+    banned = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
+
+    def module_scope_hits(source: str) -> set[str]:
+        tree = ast.parse(source)
+        scoped: list[ast.AST] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                scoped.append(node)
+            elif isinstance(node, ast.If):
+                scoped.extend(ast.walk(node))
+        found: set[str] = set()
+        for node in scoped:
+            if isinstance(node, ast.Import):
+                found |= {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                found.add(node.module.split(".")[0])
+        return found & banned
+
+    assert module_scope_hits("import pywinauto\n") == {"pywinauto"}
+    assert module_scope_hits("from playwright.sync_api import sync_playwright\n") == {"playwright"}
+    assert module_scope_hits("if TYPE_CHECKING:\n    import pywinauto\n") == {"pywinauto"}
+
+    # The sanctioned pattern: lazy, inside the function that needs it.
+    assert module_scope_hits("def go():\n    import pywinauto\n    return pywinauto\n") == set()
 
 
 # =========================================================================
