@@ -158,6 +158,43 @@ stage 0 close: **925 passed, 2 skipped** (916 at phase start).
 close: **1029 passed, 2 skipped.** Acceptance items are in
 `docs/PHASE-02-ACCEPTANCE-TESTING.md`; none of them block stage 2.
 
+**Stage 2 — automation foundations — is complete.** Suite at stage 2 close:
+**1064 passed, 2 skipped.** **Nothing can move the pointer or press a key yet**
+— stage 2 built the eyes and the permission to move, deliberately before any tool
+that moves, because a lock retrofitted onto tools written without one is how
+Phase 1's defect class reappears.
+
+| Piece | Where | What it guarantees |
+|---|---|---|
+| Desktop-ownership rule | `tests/security/test_tool_specs_are_valid.py` | A tool declaring `input.automate` or `browser.automate_logged_in` without the `foreground_desktop` lock **fails the build**. A second test asserts those capability ids exist, so the rule cannot silently match nothing |
+| `UserInputWatcher` | `jarvis/toolbox/desktop_input.py` | Tells our synthetic input from the user's, **exactly** — no time tolerance |
+| `UiaInspector` | `jarvis/toolbox/uia.py` | Reads a window's controls. Read-only, asserted structurally. Element text leaves through `Observation`, addressed by position |
+| `AutomationSession` | `jarvis/toolbox/automation.py` | The only way to get permission to move anything |
+
+**Design notes worth not rediscovering:**
+
+- **No grace window for input attribution.** The first `UserInputWatcher`
+  compared timestamps with a 250ms tolerance; a test killed it, because a user
+  grabbing the mouse 50ms after an automated click is the case that matters most
+  and a tolerance swallows precisely that. The replacement records what the
+  *system* reports immediately after our injection — anything later is not ours,
+  with no tuning. Do not reintroduce a window.
+- **One real-hardware risk is open**, recorded in the code: if Windows has not
+  registered our injection when the baseline is read, our own input reads as the
+  user's and automation pauses itself. It needs a real `SendInput` to measure,
+  which arrives in stage 3. It fails in the safe direction.
+- **Automation refuses to start when interruption cannot be observed.** Not a
+  warning — a refusal, with the underlying cause passed through. Flagged to the
+  owner as reversible if they would rather it ran anyway.
+- **An accessible name is untrusted content.** A window can label a button
+  "Cancel" and wire it elsewhere. UI text uses the *same* boundary as web
+  content; there is no more-trusting path for desktop text.
+- **A Phase 0 exit-criterion test was narrowed, not weakened.** It banned
+  importing pywinauto/playwright anywhere in `src/`, while its own docstring said
+  the rule was *module scope* — which would have banned the lazy-import pattern
+  Phase 1 already relies on for the voice stack. Now scans `tree.body` like
+  `test_lazy_audio_imports.py`, and carries a self-check proving it still bites.
+
 ### What stage 1 built, and the hole it found
 
 Built **before** anything in this product can fetch a page, which is the ordering
@@ -334,42 +371,41 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Stages 0 and 1 are complete. Stage 2 is next.**
+**Stages 0, 1 and 2 are complete. Stage 3 — the browser, and the exit criterion
+— is next.**
 
-1. **Stage 2 — automation foundations, before anything moves.** In dependency
-   order: **P2-WIN-03** (automation worker thread, pywinauto UIA backend, XL) →
-   **P2-WIN-02** (UIA inspector: accessible name, control type, automation id,
-   patterns) → **P2-WIN-04** (acquire `foreground_desktop` before any mouse or
-   keyboard action) → **P2-WIN-05** (real input pauses the task, AT-008).
+1. **Stage 3 order:** P2-BRW-01 (the Jarvis profile — it already exists on the
+   machine, created by the stage 0 spike) → P2-BRW-02 (Playwright over CDP,
+   DOM-first, visible by default) → **P2-BRW-08, the exit criterion** →
+   P2-BRW-04 (CAPTCHA pause) → P2-BRW-03 (clear profile) → P2-BRW-09.
 
-2. **P2-WIN-04 is wiring, not building.** `ResourceLockManager` already exists
-   and already knows `foreground_desktop` (`tasks/locks.py:33`), including
-   stale-lock reclamation after a crash — without which one crash while holding
-   the lock would wedge every future automation task.
+2. **Every browser action runs inside an `AutomationSession`**
+   (`jarvis/toolbox/automation.py`). It is the only thing that hands out
+   permission to move anything, and a step that injects input must pass
+   `sends_input=True` or the watcher will read our own action as the user's and
+   pause the task for no visible reason.
 
-3. **The ordering constraint in stage 2 is absolute:** P2-WIN-04 and P2-WIN-05
-   land **before the first tool that moves anything.** Retrofitting a lock onto
-   tools written without it is how Phase 1's defect class is reproduced.
-
-4. **Write the structural lock test early.** A tool that moves the mouse or
-   keyboard and does not declare `foreground_desktop` in `resource_locks` must
-   fail the build. `tests/security/test_tool_specs_are_valid.py` already works
-   this way. A rule enforced by a test beats a rule everyone remembers —
-   `voice.speak` shipped with a lock name the system did not recognise, and every
-   attempt to speak died in the invoker with a raw `ValueError`.
-
-5. **Stage 3 consumes stage 1's boundary; do not build a second one.** The
+3. **Stage 3 consumes stage 1's boundary; do not build a second one.** The
    browser adapter produces `ObservedList` / `Observation`
    (`jarvis.core.observations`) and selects by ordinal. If a `find_by_title` or
    similar appears anywhere, the injection defence has been undone —
    `tests/security/test_prompt_injection.py` asserts structurally that no such
-   method exists.
+   method exists. Stage 0 measured that YouTube results are index-addressable
+   (13 × `ytd-video-renderer` in DOM order), so this is known to work.
 
-6. **Do not let Playwright launch a browser.** Enforced by
+4. **Do not let Playwright launch a browser.** Enforced by
    `tests/security/test_browser_attach.py` (ADR-0031), but worth knowing rather
-   than discovering: launch the browser through
-   `jarvis.toolbox.launch.launch_argv` with a debugging port and attach with
-   `connect_over_cdp`.
+   than discovering: launch through `jarvis.toolbox.launch.launch_argv` with a
+   `--remote-debugging-port` and attach with `connect_over_cdp`.
+
+5. **The first tool that moves the pointer settles an open measurement.** The
+   `UserInputWatcher` baseline may be read before Windows registers our
+   injection, making automation pause on its own action. Watch for automation
+   stopping with no user cause, and measure it against a real `SendInput`.
+
+6. **`succeeded` still requires verification.** Clicking the second result and
+   reporting success is `started ≠ running` wearing a new hat: playback is
+   `unverified` until player state is read back and the video id matches.
 
 7. **Deferred to stage 6, deliberately:** the time/date tool (gates nothing) and
    the application-catalogue work (P2-WIN-01, behind its own ADR — Start-menu
