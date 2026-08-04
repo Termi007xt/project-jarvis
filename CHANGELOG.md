@@ -73,9 +73,10 @@ touching your files.
 - **Audio cues.** Short tones for "I heard the wake phrase and I am recording",
   "I am working on it", and "that is done" — so Jarvis is legible from the tray
   without its window on screen. Turn them off with `audio.cues_enabled`.
-- **`web.search`.** Searching by words rather than by URL, with DuckDuckGo,
-  Google or YouTube. Jarvis builds the address, so a query with spaces, symbols
-  or a colon in it works. It says outright that it cannot read the results.
+- **`web.search`.** Searching by words rather than by URL, with Google (the
+  default), DuckDuckGo or YouTube. Jarvis builds the address, so a query with
+  spaces, symbols or a colon in it works. It says outright that it cannot read
+  the results.
 - **Stop speaking**, in the tray menu. It interrupts the sentence and does
   nothing else: no task is cancelled and no resource lock is released.
 - **`audio.speak_replies`** — `always`, `when_useful` (the default) or `never`.

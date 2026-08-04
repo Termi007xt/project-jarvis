@@ -230,7 +230,11 @@ SEARCH_ENGINES: dict[str, str] = {
     "youtube": "https://www.youtube.com/results?search_query={query}",
 }
 
-DEFAULT_SEARCH_ENGINE = "duckduckgo"
+#: The owner's own default search engine, so Jarvis searching matches what
+#: searching normally does on this machine. Pinned by a test rather than left to
+#: the order of the table above: a silently changed search engine is the kind of
+#: thing nobody notices until the results look wrong.
+DEFAULT_SEARCH_ENGINE = "google"
 
 
 class WebSearchInput(BaseModel):

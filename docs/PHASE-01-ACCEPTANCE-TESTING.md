@@ -184,7 +184,7 @@ From Conversation, or the Developer tools screen:
 
 | Ask | Expect |
 |---|---|
-| `Search for upcoming games in 2027` | A DuckDuckGo results page, correctly encoded |
+| `Search for upcoming games in 2027` | A **Google** results page, correctly encoded |
 | `Search YouTube for RTX 5070 reviews` | A YouTube results page |
 
 > Jarvis says outright that it cannot read the results. It opens the page; the

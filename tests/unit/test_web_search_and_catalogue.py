@@ -33,7 +33,11 @@ from jarvis.toolbox.launch import (
     build_argv,
     default_catalogue,
 )
-from jarvis.toolbox.phase1_tools import SEARCH_ENGINES, WebSearchTool
+from jarvis.toolbox.phase1_tools import (
+    DEFAULT_SEARCH_ENGINE,
+    SEARCH_ENGINES,
+    WebSearchTool,
+)
 
 
 @pytest.fixture
@@ -112,6 +116,34 @@ def test_a_url_is_not_a_search_query_but_is_still_handled_safely(
     """The model sometimes passes a URL anyway. It becomes a search for it."""
     _, url = _search(catalogue, monkeypatch, query="https://example.com/x?y=1")
     assert url.startswith(tuple(t.split("{")[0] for t in SEARCH_ENGINES.values()))
+
+
+# -- which engine, when none is named --------------------------------------
+def test_the_default_engine_is_google() -> None:
+    """The owner's own default. It was DuckDuckGo; they asked for Google.
+
+    Pinned by a test because the default is a *preference*, not an accident of
+    dictionary ordering, and a silent change of search engine is exactly the
+    kind of thing nobody notices until the results look wrong.
+    """
+    assert DEFAULT_SEARCH_ENGINE == "google"
+
+
+def test_a_search_with_no_engine_named_goes_to_the_default(
+    catalogue, monkeypatch
+) -> None:
+    _, url = _search(catalogue, monkeypatch, query="upcoming games 2027")
+    assert url.startswith("https://www.google.com/search?")
+
+
+def test_the_default_is_one_of_the_approved_engines() -> None:
+    assert DEFAULT_SEARCH_ENGINE in SEARCH_ENGINES
+
+
+def test_naming_another_engine_still_works(catalogue, monkeypatch) -> None:
+    """Changing the default must not remove the choice."""
+    _, url = _search(catalogue, monkeypatch, query="cats", engine="duckduckgo")
+    assert url.startswith("https://duckduckgo.com/")
 
 
 # -- the engine is a closed set --------------------------------------------
