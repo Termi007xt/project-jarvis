@@ -57,6 +57,17 @@ SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
 
+#: Between verification attempts. Short: this is the gap between a click and a
+#: video actually starting, not a general-purpose backoff.
+VERIFY_INTERVAL_SECONDS = 1.5
+
+
+def _default_sleep(seconds: float) -> None:
+    import time
+
+    time.sleep(seconds)
+
+
 class YouTubeUnavailable(RuntimeError):
     """The page could not be driven — a failure, never an unverified success."""
 
@@ -99,9 +110,17 @@ class YouTubeAdapter:
         page: PageDriver,
         *,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        verify_attempts: int = 4,
+        sleep=None,
     ) -> None:
         self._page = page
         self._timeout = timeout_seconds
+        # Bounded, like every retry loop in this codebase (CLAUDE.md). A video
+        # does not start the instant it is clicked, and reporting "unverified"
+        # for one that is playing perfectly well is its own kind of dishonesty
+        # — but so is retrying until it eventually says yes.
+        self._verify_attempts = max(1, verify_attempts)
+        self._sleep = sleep if sleep is not None else _default_sleep
         self._results: ObservedList | None = None
         #: Ids kept alongside the observed list, so verification can compare
         #: what played against what was chosen. Not part of the observation:
@@ -160,7 +179,20 @@ class YouTubeAdapter:
                 f"could not click result {position} ({item.label!r}): {exc}"
             ) from exc
 
-        state = self._page.player_state(self._timeout)
+        # Bounded polling: a click does not make a video play instantly, so one
+        # immediate read would report "unverified" for playback that is about to
+        # start. The loop stops the moment it can say yes, and stops regardless
+        # after `verify_attempts` — a retry that runs until it likes the answer
+        # is not verification.
+        state = None
+        for attempt in range(self._verify_attempts):
+            state = self._page.player_state(self._timeout)
+            report = self._report(position, item, expected_id, state)
+            if report.verified:
+                return report
+            if attempt < self._verify_attempts - 1:
+                self._sleep(VERIFY_INTERVAL_SECONDS)
+
         return self._report(position, item, expected_id, state)
 
     @staticmethod

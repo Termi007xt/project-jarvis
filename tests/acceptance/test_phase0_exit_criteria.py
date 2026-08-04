@@ -252,12 +252,28 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         "media.control",
         "device.volume",
         "voice.speak",
+        # Phase 2, PRD section 21's exit criterion: "search RTX 5070 on YouTube
+        # and play the second video" is two utterances, so it is two tools.
+        # `youtube.play` takes a *position*, never a title — the injection
+        # defence written into a signature rather than into a rule.
+        "youtube.search",
+        "youtube.play",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"
     )
+
+    # The invariant is no longer "everything is low risk" — Phase 2's browser
+    # automation drives a profile that may hold live logins, and PRD section
+    # 11.1 classes that as medium, so pretending otherwise would be the
+    # dishonesty this test exists to prevent. What must still hold is that
+    # nothing HIGH or PROHIBITED has been wired: force-close, deletion and
+    # elevation all remain unbuilt, and none of them may arrive unannounced.
     for spec in specs:
-        assert spec.risk is RiskLevel.LOW, f"{spec.tool_id} is not low risk"
+        assert spec.risk in (RiskLevel.LOW, RiskLevel.MEDIUM), (
+            f"{spec.tool_id} is {spec.risk.value}; no phase has asked for a "
+            "high-risk or prohibited tool yet"
+        )
 
 
 def test_exit_6_a_state_changing_tool_must_declare_how_it_verifies(
@@ -281,7 +297,13 @@ def test_exit_6_the_planner_is_offered_only_registered_tools(core: JarvisCore) -
 def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
     core: JarvisCore,
 ) -> None:
-    forbidden_in_phase_0 = {
+    # `browser.automate_logged_in` left this set in Phase 2, when the browser
+    # tools it names were actually built (ADR-0019, ADR-0031). Everything else
+    # is still unbuilt, and the point of keeping the list rather than deleting
+    # the test is that none of these may arrive unannounced — `input.automate`
+    # in particular, because Phase 2 stage 2 built the *permission* to move the
+    # pointer and no tool has been given it yet.
+    still_unbuilt = {
         "input.automate",
         "screen.capture",
         "clipboard.read",
@@ -289,12 +311,16 @@ def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
         "fs.read_approved",
         "fs.write_approved",
         "fs.delete_or_overwrite",
-        "browser.automate_logged_in",
         "app.force_close",
         "system.elevate",
     }
     for spec in core.registry.specs():
-        assert not (set(spec.required_capabilities) & forbidden_in_phase_0)
+        wired = set(spec.required_capabilities) & still_unbuilt
+        assert not wired, (
+            f"{spec.tool_id} requires {sorted(wired)}, which no completed phase "
+            "has built. If a phase has now built it, say so here rather than "
+            "removing the check."
+        )
 
 
 def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> None:

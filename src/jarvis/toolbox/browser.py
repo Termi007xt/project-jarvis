@@ -57,6 +57,13 @@ _LOG = logging.getLogger(__name__)
 #: against the real page (`tools/browser-lab/test_playwright_attach.py`).
 RESULT_SELECTOR = "ytd-video-renderer"
 
+#: The dedicated automation profile (FR-056, ADR-0019 Option A). Fixed by
+#: `PROJECT_INPUTS.md` as `automation.dedicated_browser_profile: Jarvis`, and
+#: kept as a constant here rather than a config field until something actually
+#: needs it to vary — a setting nobody changes is a setting that drifts out of
+#: agreement with the profile the user has signed into.
+DEDICATED_BROWSER_PROFILE = "Jarvis"
+
 #: How long to wait for the browser to open its debugging port before giving up.
 CDP_READY_TIMEOUT_SECONDS = 20.0
 _CDP_POLL_SECONDS = 0.25
@@ -113,6 +120,7 @@ class BraveCdpSession:
         self._port: int | None = None
         self._playwright: Any = None
         self._browser: Any = None
+        self._page: "PlaywrightPageDriver | None" = None
 
     @property
     def attached(self) -> bool:
@@ -164,17 +172,27 @@ class BraveCdpSession:
                 _LOG.warning("browser teardown did not complete cleanly", exc_info=True)
         self._browser = None
         self._playwright = None
+        self._page = None
         self._port = None
 
     def page(self) -> "PlaywrightPageDriver":
+        """The session's page. The *same* one every time.
+
+        This opened a new tab on every call until a spike called it twice and
+        got two. "Play the second video" would then have run against a fresh
+        blank tab rather than the results the search had just read — the two
+        utterances silently talking about different pages.
+        """
         if self._browser is None:
             raise BrowserUnavailable("no browser is attached; use this as a context manager")
-        context = (
-            self._browser.contexts[0]
-            if self._browser.contexts
-            else self._browser.new_context()
-        )
-        return PlaywrightPageDriver(context.new_page())
+        if self._page is None:
+            context = (
+                self._browser.contexts[0]
+                if self._browser.contexts
+                else self._browser.new_context()
+            )
+            self._page = PlaywrightPageDriver(context.new_page())
+        return self._page
 
 
 class PlaywrightPageDriver:

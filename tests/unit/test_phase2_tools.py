@@ -22,7 +22,7 @@ from jarvis.toolbox.phase2_tools import (
 )
 from jarvis.toolbox.youtube import YouTubeAdapter
 
-from tests.unit.test_youtube_adapter import FakePage
+from tests.unit.test_youtube_adapter import FakePage, no_sleep
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def workspace() -> BrowserWorkspace:
     space = BrowserWorkspace()
     page = FakePage()
     page.player = {"playing": True, "video_id": "bbb222"}
-    space.set_adapter(YouTubeAdapter(page=page))
+    space.set_adapter(YouTubeAdapter(page=page, sleep=no_sleep))
     return space
 
 
@@ -82,7 +82,7 @@ def test_a_click_the_player_cannot_confirm_is_unverified_not_failed() -> None:
     space = BrowserWorkspace()
     page = FakePage()
     page.player = None  # the player cannot be read
-    space.set_adapter(YouTubeAdapter(page=page))
+    space.set_adapter(YouTubeAdapter(page=page, sleep=no_sleep))
 
     YouTubeSearchTool(space).run(ToolContext(), YouTubeSearchInput(query="RTX 5070"))
     execution = YouTubePlayTool(space).run(ToolContext(), YouTubePlayInput(position=1))

@@ -61,6 +61,7 @@ from jarvis.tasks.states import TaskState
 from jarvis.tasks.store import TaskStore
 from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
 from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
+from jarvis.toolbox.phase2_tools import BrowserWorkspace, register_phase2_tools
 from jarvis.toolbox.system_health import HealthCheckRunner, SystemHealthTool
 
 __all__ = ["JarvisCore", "CoreStatus", "EmergencyStopReport"]
@@ -277,6 +278,16 @@ class JarvisCore:
             # ``notify`` needs a shell; the UI supplies it via attach_shell().
             notify=None,
         )
+        # 9b. browser automation (Phase 2). The workspace holds the results of
+        # the last search so "play the second video" has a list to index into —
+        # the tools are registered whether or not a browser session is open, and
+        # say plainly that nothing has been searched for yet rather than being
+        # absent from the catalogue (ADR-0010).
+        self.browser_workspace = BrowserWorkspace(
+            session_factory=self._open_browser_session
+        )
+        register_phase2_tools(self.registry, self.browser_workspace)
+
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
 
@@ -360,6 +371,37 @@ class JarvisCore:
             model=self.models.resolve(ModelRole.CONVERSATION).name,
         )
 
+    def _open_browser_session(self):
+        """Open Brave on the dedicated Jarvis profile, attached over CDP.
+
+        The browser is started through the single authorised process-creation
+        call site with an ephemeral debugging port, and Playwright attaches to
+        it (ADR-0029, ADR-0031). The profile is the dedicated one FR-056
+        requires, so automation never drives the user's personal session
+        (ADR-0019).
+        """
+        from dataclasses import replace
+
+        from jarvis.toolbox.browser import DEDICATED_BROWSER_PROFILE, BraveCdpSession
+
+        brave = self.applications.get("brave")
+        if brave is None:
+            raise RuntimeError(
+                "Brave is not in the application catalogue, so there is no "
+                "approved browser to automate."
+            )
+        # A copy carrying the profile flag; the catalogue entry itself is the
+        # user's and is not modified.
+        automation_entry = replace(
+            brave,
+            app_id="brave_jarvis_profile",
+            fixed_arguments=(
+                *brave.fixed_arguments,
+                f"--profile-directory={DEDICATED_BROWSER_PROFILE}",
+            ),
+        )
+        return BraveCdpSession(automation_entry)
+
     def _seed_bootstrap_grants(self) -> None:
         """Grant the two strictly self-inspecting capabilities on first start.
 
@@ -407,6 +449,11 @@ class JarvisCore:
         voice = getattr(self, "voice", None)
         if voice is not None:
             voice.shutdown()
+        # A browser left attached is a browser left listening on a debugging
+        # port. Closing it is a security control, not tidiness (ADR-0031).
+        workspace = getattr(self, "browser_workspace", None)
+        if workspace is not None:
+            workspace.close()
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)

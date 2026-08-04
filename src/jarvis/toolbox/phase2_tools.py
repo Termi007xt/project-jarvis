@@ -47,33 +47,74 @@ _LOG = logging.getLogger(__name__)
 
 
 class BrowserWorkspace:
-    """Holds the adapter between the two utterances.
+    """Holds the browser session and adapter across the two utterances.
 
     "Play the second video" only means something in the context of a search that
     already happened, so the results have to outlive one invocation. This is the
     only state Phase 2 keeps between tool calls, and it holds *results*, never
     authority — the permission checks run again on the second call regardless.
+
+    It also opens the browser on first use. Without that, `youtube.search` would
+    be registered, enabled, and permanently answering "there is no browser
+    session" — a control that is offered and can never work, which is the exact
+    defect class that cost Phase 1 six acceptance rounds. The rule from that
+    phase applies here: an enabled control either does something or says why it
+    cannot, and "why it cannot" has to be a reason, not a permanent state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, session_factory=None) -> None:
         self._adapter = None
+        self._session = None
+        self._session_factory = session_factory
 
     def set_adapter(self, adapter) -> None:
+        """Inject an adapter directly. Used by tests and by an open session."""
         self._adapter = adapter
+
+    def _open(self) -> None:
+        from jarvis.toolbox.youtube import YouTubeAdapter
+
+        session = self._session_factory()  # type: ignore[misc]
+        session.__enter__()
+        self._session = session
+        self._adapter = YouTubeAdapter(page=session.page())
 
     @property
     def adapter(self):
         if self._adapter is None:
-            raise ToolFailure(
-                "no_browser_session",
-                "there is no browser session, so there is nothing to act on. "
-                "Search for something first.",
-            )
+            if self._session_factory is None:
+                raise ToolFailure(
+                    "no_browser_session",
+                    "browser automation is not wired up in this build, so there "
+                    "is nothing to search in.",
+                )
+            try:
+                self._open()
+            except Exception as exc:  # noqa: BLE001 - declared failure code
+                raise ToolFailure(
+                    "browser_unavailable",
+                    f"the browser could not be opened, so nothing was searched: {exc}",
+                ) from exc
         return self._adapter
 
     @property
-    def has_results(self) -> bool:
-        return self._adapter is not None
+    def is_open(self) -> bool:
+        return self._session is not None
+
+    def close(self) -> None:
+        """Shut the browser down. Idempotent, and safe to call during teardown.
+
+        Not optional tidiness: a browser left attached is a browser left
+        listening on a debugging port, which is the residual risk ADR-0031
+        bounds by keeping the port session-scoped.
+        """
+        session, self._session = self._session, None
+        self._adapter = None
+        if session is not None:
+            try:
+                session.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 - teardown must not mask a failure
+                _LOG.warning("the browser session did not close cleanly", exc_info=True)
 
 
 # =========================================================================
