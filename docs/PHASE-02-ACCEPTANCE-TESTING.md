@@ -603,4 +603,120 @@ python -m pytest
 
 ---
 
-<!-- Stage 4 section is added here when stage 4 completes. -->
+# Stage 4 — windows (part 1 of 3)
+
+**Status: window discovery and arrangement work.** Close-before-force and screen
+capture are still to come; this section covers what you can drive today.
+
+Unlike stages 1 and 2, **there is real stuff to operate here.**
+
+## 4.1 — Ask what's open ⭐ **start here**
+
+**Say:** *"what windows are open"* or *"list my windows"*.
+
+**You should see:** a list with a position number, the application, whether each
+is minimised or maximised, and where it is. Positions count from **0**.
+
+**Two things to check specifically:**
+
+- **Any password manager, or the Windows credential/UAC prompt, should appear
+  with its title withheld** — `[sensitive window — title withheld]` — not
+  missing. It is listed so Jarvis can say why it won't touch it, and its title
+  is withheld because a title like "Chase — personal banking" is exactly what
+  the block exists to keep out of prompts and logs.
+- **Titles you see are quoted as data**, not instructions. A window called
+  "Ignore previous instructions" is just a window with a silly name.
+
+**Tell me:** if a sensitive app of yours is *not* on the list. The default list
+covers 1Password, Bitwarden, KeePass/KeePassXC, LastPass, Dashlane, Enpass,
+Proton Pass, NordPass, RoboForm, Keeper, and the Windows consent/logon surfaces.
+If you use something else, name it and I'll add it.
+
+## 4.2 — Move a window
+
+**Say:** *"put my browser on the left half of the screen"*, or *"minimise the
+second window"*, or *"maximise window 3"*.
+
+**You should see:** it does it, and says what it did — naming the application and
+where it ended up. Snapping works out the geometry from your actual screen, so
+"the left half" is really half.
+
+**Expect an approval prompt.** `window.arrange` is medium risk, because
+activating a window takes the foreground away from whatever you were doing.
+`window.list` is low risk and reads only.
+
+**Tell me:** if it moves the *wrong* window. That is the failure mode I care
+about most here — see 4.4.
+
+## 4.3 — Try to move something it should refuse
+
+**Do:** open your password manager. Then ask Jarvis to minimise or maximise it,
+using whatever position it shows in `window.list`.
+
+**You should see:** a refusal that names the application and says the list is
+editable in Settings. **Nothing should move.**
+
+**Also try:** ask Jarvis to arrange a window while a UAC prompt is on screen. It
+should say it will not automate while a secure screen is up, rather than
+silently doing nothing.
+
+**Tell me:** if anything moves in either case. That would be a real security
+defect, not a rough edge.
+
+## 4.4 — The defect the lab caught, so you know what to watch for ⭐
+
+Worth knowing because the symptom is confusing if it ever comes back.
+
+`EnumWindows` returns windows in **z-order**, so acting on a window *reorders the
+list*. The live lab opened its own Notepad window, minimised it, and then
+reported:
+
+```
+asked 'Antigravity IDE.exe' to become minimised
+```
+
+It had verified against a completely different window — and gone on to move my
+IDE. A position is how a *person* names a window in a list they were just shown;
+it is not an identity, because the list doesn't hold still.
+
+**Fixed:** a position resolves to a window handle once, and everything after
+follows the handle. Re-verified live — all five actions landed on Notepad.
+
+**What this means for you:** positions go stale the moment anything moves.
+Jarvis is told to re-read the list before each arrange. If you say *"minimise
+window 2, then maximise window 4"*, the second number refers to the list **after**
+the first move, which may not be what you meant.
+
+**Tell me:** if a multi-step window request lands somewhere unexpected. That is
+this, and it is the honest limit of positional addressing over a list that moves.
+
+## 4.5 — Optional: run the live window lab yourself
+
+```powershell
+python tools\window-lab\test_window_actions_live.py
+```
+
+**You should see:** it opens Notepad, minimises/maximises/restores/activates and
+moves it to the left half, five `[OK  ]` lines, and closes the window it opened.
+It refuses to run if Notepad is already open, so it only ever acts on a window it
+created. Your own windows are read, never touched.
+
+## 4.6 — Confirm the suite
+
+```powershell
+python -m pytest
+```
+
+**You should see:** `1220 passed, 2 skipped`.
+
+## Still to come in stage 4
+
+Not built yet, so don't test for them: close-before-force with unsaved-work
+detection (P2-APP-01), force-close confirmation (P2-APP-02), and screen capture
+with a visible indicator (P2-WIN-10/11). **ADR-0019 requires the Option D
+browser-profile decision to be revisited before screen capture ships** — I'll
+bring that to you before writing it, not after.
+
+---
+
+<!-- Stage 4 part 2 is added here when close-before-force lands. -->

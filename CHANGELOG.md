@@ -11,6 +11,24 @@ has shipped yet.
 
 ### Added
 
+- **Jarvis can see and arrange your windows** (`window.list`, `window.arrange`,
+  FR-240 … FR-243). Bring a window forward, minimise, maximise, restore, snap to
+  a half, or move it exactly. Two tools rather than one, because reading which
+  windows are open and taking the foreground away from what you are doing are
+  different risks: listing is low and holds no lock, arranging is medium and
+  owns the desktop first. Windows are chosen by their position in the listing
+  and there is no title parameter at all, so a window cannot retarget an action
+  by renaming itself. Snapping works the geometry out from the real screen
+  rather than from a guess.
+- **Automation refuses windows that should not be touched** (FR-079, FR-081,
+  AT-031). Credential managers, the Windows consent and logon surfaces, and any
+  window whose own title names a secret. The refusal keys on process identity,
+  which comes from the operating system; a window title may only *add* a
+  refusal and never remove one, or the way past the password-manager blocklist
+  would be for the application to rename itself. Sensitive windows are still
+  listed, with their titles withheld, so Jarvis can say why it will not act.
+  Nothing is automated at all while Windows is showing a UAC prompt, the lock
+  screen or Ctrl+Alt+Del.
 - **Jarvis can close and reopen the browser itself** (`browser.restart`,
   ADR-0032). It had been offering to do this for some time — *"Closing Brave
   briefly then reopening will restore your tabs"* — with no capability behind

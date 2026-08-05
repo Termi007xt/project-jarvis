@@ -265,6 +265,15 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # tool and its own capability rather than folded into `youtube.search`:
         # approving a search is not approving the loss of someone's windows.
         "browser.restart",
+        # Phase 2 stage 4 (P2-WIN-08, P2-WIN-09). Two tools, not one, because
+        # reading which windows are open and taking the foreground away from
+        # what the owner is doing are different risks — `window.list` is low and
+        # holds no lock, `window.arrange` is medium and owns the desktop first.
+        # `window.arrange` takes a position from the listing and has no title
+        # parameter at all, so a window cannot retarget an action by renaming
+        # itself.
+        "window.list",
+        "window.arrange",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"

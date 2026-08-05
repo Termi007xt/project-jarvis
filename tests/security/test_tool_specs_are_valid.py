@@ -56,6 +56,12 @@ INPUT_OWNING_CAPABILITIES = frozenset(
     {
         "input.automate",
         "browser.automate_logged_in",
+        # Arranging windows moves nothing through the pointer, but `activate`
+        # takes the foreground — which is the same contended resource for the
+        # same reason. Two tasks arranging windows at once, or one arranging
+        # while another drives a browser, produce exactly the interleaving this
+        # lock exists to prevent.
+        "window.arrange",
     }
 )
 

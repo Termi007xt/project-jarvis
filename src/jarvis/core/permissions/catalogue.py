@@ -64,6 +64,10 @@ _ALL: tuple[Capability, ...] = (
        "Send play, pause, next, previous or stop to the system media controls.", 1),
     _c("window.read_active_title", "Read the active window title", _LOW,
        "Read the title of the currently focused window.", 2),
+    _c("window.read_layout", "See which windows are open", _LOW,
+       "List the open windows, where they are on screen and whether they are "
+       "minimised or maximised. Reads only; moves nothing. Windows belonging to "
+       "sensitive applications are listed without their titles.", 2),
     _c("notify.show", "Show a notification", _LOW,
        "Display a Windows toast notification.", 1),
 
@@ -88,6 +92,11 @@ _ALL: tuple[Capability, ...] = (
        "Close the browser and start it again so it can be automated. Open tabs "
        "are restored, because the browser is asked to close rather than killed.",
        2, scope_kind="application"),
+    _c("window.arrange", "Move and arrange windows", _MEDIUM,
+       "Bring a window to the front, minimise, maximise, restore, move or "
+       "resize it. Medium rather than low because activating a window takes the "
+       "foreground away from whatever you were doing.", 2,
+       scope_kind="application"),
     _c("app.monitor", "Monitor an application", _MEDIUM,
        "Observe a named application's visible state.", 4, scope_kind="application"),
     _c("messages.copy_private", "Copy private messages", _MEDIUM,

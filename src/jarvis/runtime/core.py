@@ -62,6 +62,9 @@ from jarvis.tasks.store import TaskStore
 from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
 from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
 from jarvis.toolbox.phase2_tools import BrowserWorkspace, register_phase2_tools
+from jarvis.toolbox.phase2_window_tools import register_window_tools
+from jarvis.toolbox.window_actions import Win32ActionBackend, WindowController
+from jarvis.toolbox.windows import WindowDiscovery
 from jarvis.toolbox.system_health import HealthCheckRunner, SystemHealthTool
 
 __all__ = ["JarvisCore", "CoreStatus", "EmergencyStopReport"]
@@ -297,6 +300,17 @@ class JarvisCore:
             session_factory=self._open_browser_session
         )
         register_phase2_tools(self.registry, self.browser_workspace)
+
+        # 9c. window management (Phase 2 stage 4). Discovery is read-only and
+        # the controller is the only thing that acts, sharing one blocklist so
+        # a window hidden from the listing cannot be arranged either.
+        self.window_discovery = WindowDiscovery()
+        self.window_controller = WindowController(
+            discovery=self.window_discovery, backend=Win32ActionBackend()
+        )
+        register_window_tools(
+            self.registry, self.window_discovery, self.window_controller
+        )
 
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
