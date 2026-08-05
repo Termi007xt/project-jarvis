@@ -16,10 +16,13 @@ has shipped yet.
   a half, or move it exactly. Two tools rather than one, because reading which
   windows are open and taking the foreground away from what you are doing are
   different risks: listing is low and holds no lock, arranging is medium and
-  owns the desktop first. Windows are chosen by their position in the listing
-  and there is no title parameter at all, so a window cannot retarget an action
-  by renaming itself. Snapping works the geometry out from the real screen
-  rather than from a guess.
+  owns the desktop first. A window is named by a reference the listing hands
+  out, never by its title, so a window cannot retarget an action by renaming
+  itself. Snapping works the geometry out from the real screen rather than from
+  a guess. Only windows a person would recognise as open are listed — no caption,
+  cloaked, tool, owned and zero-area windows are left out, filtered on Win32
+  attributes rather than on a list of names that would be both incomplete and
+  defeatable.
 - **Automation refuses windows that should not be touched** (FR-079, FR-081,
   AT-031). Credential managers, the Windows consent and logon surfaces, and any
   window whose own title names a secret. The refusal keys on process identity,

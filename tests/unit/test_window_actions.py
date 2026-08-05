@@ -97,6 +97,16 @@ def _controller(windows, *, obeys=True, secure=False, sensitive=None):
     return controller, actions
 
 
+def _ref(controller, index: int = 0) -> str:
+    """The reference for the nth window, the way `window.list` hands it out.
+
+    Tests name windows the same way the tool does — by listing first — because
+    a reference that only tests can mint would prove nothing about the path the
+    product takes.
+    """
+    return controller.discovery.list_windows()[index].ref
+
+
 # =========================================================================
 # The guards, exercised through the action rather than directly
 # =========================================================================
@@ -107,7 +117,7 @@ def test_an_action_on_a_sensitive_window_is_refused() -> None:
     )
 
     with pytest.raises(SensitiveWindowRefused) as raised:
-        controller.activate(0)
+        controller.activate(_ref(controller))
 
     assert not actions.calls, "the window was moved before the refusal"
     assert "1password" in str(raised.value).casefold()
@@ -116,9 +126,9 @@ def test_an_action_on_a_sensitive_window_is_refused() -> None:
 @pytest.mark.parametrize(
     "call",
     [
-        lambda c: c.activate(0),
-        lambda c: c.set_state(0, WindowState.MAXIMISED),
-        lambda c: c.move_resize(0, 10, 10, 400, 300),
+        lambda c: c.activate(_ref(c)),
+        lambda c: c.set_state(_ref(c), WindowState.MAXIMISED),
+        lambda c: c.move_resize(_ref(c),10, 10, 400, 300),
     ],
 )
 def test_every_action_refuses_a_sensitive_window(call) -> None:
@@ -134,9 +144,9 @@ def test_every_action_refuses_a_sensitive_window(call) -> None:
 @pytest.mark.parametrize(
     "call",
     [
-        lambda c: c.activate(0),
-        lambda c: c.set_state(0, WindowState.MINIMISED),
-        lambda c: c.move_resize(0, 0, 0, 100, 100),
+        lambda c: c.activate(_ref(c)),
+        lambda c: c.set_state(_ref(c), WindowState.MINIMISED),
+        lambda c: c.move_resize(_ref(c),0, 0, 100, 100),
     ],
 )
 def test_nothing_moves_while_the_secure_desktop_is_up(call) -> None:
@@ -171,7 +181,7 @@ def test_a_state_change_is_confirmed_by_reading_it_back() -> None:
         discovery=discovery, backend=actions, secure_desktop=lambda: False
     )
 
-    report = controller.set_state(0, WindowState.MAXIMISED)
+    report = controller.set_state(_ref(controller), WindowState.MAXIMISED)
 
     assert report.verified is True
     assert report.state is WindowState.MAXIMISED
@@ -181,7 +191,7 @@ def test_a_window_that_ignored_the_request_is_unverified_not_succeeded() -> None
     """Some windows refuse, and reporting that as success is the lie FR-048 bans."""
     controller, actions = _controller([_window(state="normal")], obeys=False)
 
-    report = controller.set_state(0, WindowState.MAXIMISED)
+    report = controller.set_state(_ref(controller), WindowState.MAXIMISED)
 
     assert actions.calls, "the request was never made"
     assert report.verified is False
@@ -201,7 +211,7 @@ def test_a_move_is_confirmed_against_the_bounds_actually_reported() -> None:
         discovery=_desktop(windows), backend=actions, secure_desktop=lambda: False
     )
 
-    report = controller.move_resize(0, 100, 50, 640, 480)
+    report = controller.move_resize(_ref(controller),100, 50, 640, 480)
 
     assert report.verified is True
     assert report.bounds == (100, 50, 640, 480)
@@ -222,7 +232,7 @@ def test_a_move_that_landed_somewhere_else_is_unverified() -> None:
         discovery=_desktop(windows), backend=actions, secure_desktop=lambda: False
     )
 
-    report = controller.move_resize(0, 100, 50, 10, 10)
+    report = controller.move_resize(_ref(controller),100, 50, 10, 10)
 
     assert report.verified is False
     assert report.bounds == (100, 50, 300, 200)
@@ -266,7 +276,7 @@ def test_verification_follows_the_window_not_the_position() -> None:
         discovery=_desktop(windows), backend=actions, secure_desktop=lambda: False
     )
 
-    report = controller.set_state(0, WindowState.MINIMISED)
+    report = controller.set_state(_ref(controller), WindowState.MINIMISED)
 
     assert actions.calls == [("set_state", 1, "minimised")], "acted on the wrong window"
     assert report.verified is True, (
@@ -291,7 +301,7 @@ def test_a_window_that_vanished_during_the_action_is_unverified() -> None:
         discovery=_desktop(windows), backend=actions, secure_desktop=lambda: False
     )
 
-    report = controller.set_state(0, WindowState.MAXIMISED)
+    report = controller.set_state(_ref(controller), WindowState.MAXIMISED)
     assert report.verified is False
     assert "gone" in report.detail.casefold() or "closed" in report.detail.casefold()
 
@@ -299,11 +309,11 @@ def test_a_window_that_vanished_during_the_action_is_unverified() -> None:
 # =========================================================================
 # Positional addressing
 # =========================================================================
-def test_a_position_past_the_end_is_refused_clearly() -> None:
+def test_a_reference_that_was_never_listed_is_refused_clearly() -> None:
     controller, actions = _controller([_window()])
-    with pytest.raises(IndexError) as raised:
-        controller.activate(5)
-    assert "5" in str(raised.value)
+    with pytest.raises(KeyError) as raised:
+        controller.activate("win-never-listed")
+    assert "window.list" in str(raised.value)
     assert not actions.calls
 
 
@@ -312,4 +322,8 @@ def test_no_action_accepts_a_title() -> None:
     for name in ("activate", "set_state", "move_resize"):
         signature = inspect.signature(getattr(WindowController, name))
         assert "title" not in signature.parameters, f"{name} takes a title"
-        assert "position" in signature.parameters, f"{name} is not positional"
+        assert "ref" in signature.parameters, (
+            f"{name} does not name its window by reference. A position is an "
+            "index into a list that reorders, which is what moved the wrong "
+            "window on 2026-08-05"
+        )

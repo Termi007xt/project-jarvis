@@ -39,11 +39,11 @@ from jarvis.toolbox.windows import WindowDiscovery, WindowState  # noqa: E402
 NOTEPAD = r"C:\Windows\System32\notepad.exe"
 
 
-def find_notepad(discovery: WindowDiscovery) -> int | None:
-    """Its *position*, found by process identity — never by title."""
+def find_notepad(discovery: WindowDiscovery) -> str | None:
+    """Its *reference*, found by process identity — never by title."""
     for window in discovery.list_windows():
         if window.process_name.casefold() == "notepad.exe":
-            return window.index
+            return window.ref
     return None
 
 
@@ -65,40 +65,36 @@ def main() -> int:
         return 1
 
     launch_argv((NOTEPAD,))
-    position = None
+    ref = None
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
-        position = find_notepad(discovery)
-        if position is not None:
+        ref = find_notepad(discovery)
+        if ref is not None:
             break
         time.sleep(0.25)
 
-    if position is None:
+    if ref is None:
         print("\nFAILED: Notepad did not appear within 15s.")
         return 1
 
-    before = discovery.list_windows()[position]
-    print(f"\nopened Notepad at position {position}, handle {before.handle}")
+    before = next(w for w in discovery.list_windows() if w.ref == ref)
+    print(f"\nopened Notepad, reference {ref}")
     print(f"  starting state  : {before.state.value}  {before.bounds}")
 
     failures = 0
 
     def check(make_report, expectation: str) -> None:
-        """Re-find the window, then act.
+        """Act using the reference taken once, before any of this ran.
 
-        Positions go stale the moment anything moves: `EnumWindows` returns
-        z-order, so acting on a window changes where it sits in the list. That
-        is not a lab artefact — it is the product's contract too, and the reason
-        the tool loop re-reads before each step rather than reusing a position
-        it was given three actions ago.
+        This is the point of references. An earlier version of this lab re-found
+        the window before every step, because positions went stale the moment
+        anything moved — and the *product* could not do that, which is how
+        "move my code editor to the left" moved the Jarvis window instead. The
+        same reference is reused throughout here precisely to prove it survives
+        the reordering each action causes.
         """
         nonlocal failures
-        current = find_notepad(discovery)
-        if current is None:
-            print(f"  [FAIL] {expectation:28} -> the window disappeared")
-            failures += 1
-            return
-        report = make_report(current)
+        report = make_report(ref)
         mark = "OK  " if report.verified else "FAIL"
         if not report.verified:
             failures += 1
@@ -141,7 +137,7 @@ def main() -> int:
 
         current = find_notepad(discovery)
         if current is not None:
-            handle = discovery.list_windows()[current].handle
+            handle = next(w for w in discovery.list_windows() if w.ref == current).handle
             ctypes.windll.user32.PostMessageW(handle, 0x0010, 0, 0)  # WM_CLOSE
             print("\nClosed the Notepad window this opened.")
 

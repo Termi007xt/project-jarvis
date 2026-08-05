@@ -22,8 +22,18 @@ reports `verified` only when what was asked for is what is now true. Anything
 else is `unverified`, which by design never satisfies a task's success criteria
 (FR-048).
 
-Addressing is positional throughout. Nothing here takes a title, because a title
-is what a window could change to make an action land somewhere else.
+**A window is named by reference, not by position.** Positions were the original
+design and were wrong for this: an index into a list that reorders whenever
+anything moves. On 2026-08-05 *"move my code editor to the left half"* moved the
+Jarvis window, because by the time the call arrived the position the model had
+chosen meant something else — and the action then verified against the window it
+really moved and reported success, truthfully, about the wrong thing.
+
+A reference is an opaque token minted by `window.list` and bound to a window
+handle. It means the same window however the desktop reorders, and it cannot be
+forged: a model that has not listed a window has no token for it, and a window
+cannot mint one for itself by changing its title. Nothing here takes a title, for
+that last reason.
 """
 
 from __future__ import annotations
@@ -60,7 +70,7 @@ class SensitiveWindowRefused(RuntimeError):
 class WindowActionReport:
     """What was asked, and what is actually true afterwards."""
 
-    position: int
+    ref: str
     action: str
     verified: bool
     state: WindowState
@@ -128,8 +138,8 @@ class WindowController:
     secure_desktop: Callable[[], bool] = secure_desktop_active
 
     # -- guards -----------------------------------------------------------
-    def _target(self, position: int) -> WindowInfo:
-        """Resolve a position to a window, refusing before anything moves.
+    def _target(self, ref: str) -> WindowInfo:
+        """Resolve a reference to a window, refusing before anything moves.
 
         Both checks run on every entry point. The secure desktop first, because
         while it is up nothing about the ordinary desktop can be acted on at
@@ -142,20 +152,19 @@ class WindowController:
                 "up, and Jarvis will not try. Deal with the prompt and ask again."
             )
 
-        windows = self.discovery.list_windows()
-        if position < 0 or position >= len(windows):
-            raise IndexError(
-                f"there is no window at position {position}; "
-                f"{len(windows)} window(s) are open."
-            )
+        handle = self.discovery.resolve(ref)
+        window = next(
+            (w for w in self.discovery.list_windows() if w.handle == handle), None
+        )
+        if window is None:  # pragma: no cover - resolve has already checked
+            raise KeyError("that window has been closed since it was listed.")
 
-        window = windows[position]
         if window.sensitive:
             raise SensitiveWindowRefused(
-                f"the window at position {position} belongs to "
-                f"'{window.process_name}', which is on the sensitive-application "
-                "list. Jarvis does not automate it. The list is editable in "
-                "Settings; this cannot be approved at the time of asking."
+                f"that window belongs to '{window.process_name}', which is on "
+                "the sensitive-application list. Jarvis does not automate it. "
+                "The list is editable in Settings; this cannot be approved at "
+                "the time of asking."
             )
         return window
 
@@ -179,19 +188,19 @@ class WindowController:
         return None
 
     # -- actions ----------------------------------------------------------
-    def activate(self, position: int) -> WindowActionReport:
+    def activate(self, ref: str) -> WindowActionReport:
         """Bring a window to the front (FR-241)."""
-        window = self._target(position)
+        window = self._target(ref)
         self.backend.activate(window.handle)
         after = self._reread(window.handle)
         if after is None:
-            return self._vanished(position, "activate", window)
+            return self._vanished(ref, "activate", window)
         # Foreground is not readable from the window list, so this reports what
         # it can confirm — the window still exists and is no longer minimised —
         # rather than claiming a foreground change it has not observed.
         verified = after.state is not WindowState.MINIMISED
         return WindowActionReport(
-            position=position,
+            ref=ref,
             action="activate",
             verified=verified,
             state=after.state,
@@ -204,7 +213,7 @@ class WindowController:
         )
 
     @staticmethod
-    def _vanished(position: int, action: str, window: WindowInfo) -> WindowActionReport:
+    def _vanished(ref: str, action: str, window: WindowInfo) -> WindowActionReport:
         """The window closed while we were acting on it.
 
         Not found is not the same as did not work — it may well have worked and
@@ -212,7 +221,7 @@ class WindowController:
         only calls something verified when it has been read back.
         """
         return WindowActionReport(
-            position=position,
+            ref=ref,
             action=action,
             verified=False,
             state=window.state,
@@ -223,16 +232,16 @@ class WindowController:
             ),
         )
 
-    def set_state(self, position: int, state: WindowState) -> WindowActionReport:
+    def set_state(self, ref: str, state: WindowState) -> WindowActionReport:
         """Minimise, maximise or restore (FR-242)."""
-        window = self._target(position)
+        window = self._target(ref)
         self.backend.set_state(window.handle, state.value)
         after = self._reread(window.handle)
         if after is None:
-            return self._vanished(position, f"set_state:{state.value}", window)
+            return self._vanished(ref, f"set_state:{state.value}", window)
         verified = after.state is state
         return WindowActionReport(
-            position=position,
+            ref=ref,
             action=f"set_state:{state.value}",
             verified=verified,
             state=after.state,
@@ -249,7 +258,7 @@ class WindowController:
         )
 
     def move_resize(
-        self, position: int, x: int, y: int, width: int, height: int
+        self, ref: str, x: int, y: int, width: int, height: int
     ) -> WindowActionReport:
         """Place a window (FR-243).
 
@@ -257,14 +266,14 @@ class WindowController:
         so the geometry that results is frequently not the geometry requested.
         That is a fact worth reporting rather than rounding up.
         """
-        window = self._target(position)
+        window = self._target(ref)
         self.backend.move_resize(window.handle, x, y, width, height)
         after = self._reread(window.handle)
         if after is None:
-            return self._vanished(position, "move_resize", window)
+            return self._vanished(ref, "move_resize", window)
         verified = after.bounds == (x, y, width, height)
         return WindowActionReport(
-            position=position,
+            ref=ref,
             action="move_resize",
             verified=verified,
             state=after.state,

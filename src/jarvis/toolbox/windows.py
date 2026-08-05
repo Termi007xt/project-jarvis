@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -73,12 +74,60 @@ class WindowState(str, Enum):
         return cls.NORMAL
 
 
+#: Shell surfaces that are not windows in any sense a person means. Matched on
+#: title *and* owning process together, so an ordinary File Explorer window —
+#: also `explorer.exe` — is never caught by it.
+_SHELL_WINDOWS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("program manager", "explorer.exe"),
+        ("windows input experience", "textinputhost.exe"),
+        ("windows shell experience host", "shellexperiencehost.exe"),
+        ("windows default lock screen", "logonui.exe"),
+    }
+)
+
+
+def is_shell_window(title: str, process_name: str) -> bool:
+    """Whether this is the desktop itself rather than something on it."""
+    return (title.strip().casefold(), process_name.strip().casefold()) in _SHELL_WINDOWS
+
+
+def is_user_facing(
+    *,
+    title: str,
+    cloaked: bool,
+    tool_window: bool,
+    owned: bool,
+    bounds: tuple[int, int, int, int],
+) -> bool:
+    """Whether a person would call this an open window.
+
+    Reported 2026-08-05: eleven windows listed where the owner had four. The
+    other seven were "Windows Input Experience", "Program Manager", an
+    off-screen `ApplicationFrameHost` ghost and similar — none of which anybody
+    thinks of as open, and all of which made the model choose between eleven
+    candidates when there were four.
+
+    Every test here is a Win32 attribute rather than a title. A skip list of
+    names would be both incomplete and defeatable, and the properties that
+    actually distinguish these are structural: no caption, DWM-cloaked (which is
+    what UWP leaves behind when its window is not really there), a tool window,
+    owned by another window, or no area at all.
+    """
+    if not title.strip():
+        return False
+    if cloaked or tool_window or owned:
+        return False
+    _, _, width, height = bounds
+    return width > 0 and height > 0
+
+
 @dataclass(frozen=True)
 class WindowInfo:
     """One top-level window, as the OS describes it.
 
     ``title`` is application-authored text: evidence, and what the user sees, but
-    never a selector. ``index`` is what an action refers to.
+    never a selector. ``ref`` is what an action refers to.
     """
 
     index: int
@@ -92,11 +141,15 @@ class WindowInfo:
     #: On the sensitive list. Actions against it are refused, and the title
     #: above has already been replaced.
     sensitive: bool = False
+    #: The opaque token an action names this window by. Bound to the handle, so
+    #: it keeps meaning this window however the desktop reorders — see
+    #: `WindowDiscovery.resolve`.
+    ref: str = ""
 
     @property
     def observed_handle(self) -> str:
-        """What an action refers to. Derived from position, never from text."""
-        return f"nth={self.index}"
+        """What an action refers to. Not derived from the title."""
+        return self.ref or f"nth={self.index}"
 
 
 class WindowBackend(Protocol):
@@ -155,18 +208,33 @@ class Win32WindowBackend:
             rect = wintypes.RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(rect))
 
+            process_name = names.get(int(pid.value), "")
+            bounds = (
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            )
+            if not is_user_facing(
+                title=buffer.value,
+                cloaked=_is_cloaked(hwnd),
+                tool_window=bool(
+                    user32.GetWindowLongW(hwnd, -20) & 0x00000080  # WS_EX_TOOLWINDOW
+                ),
+                owned=bool(user32.GetWindow(hwnd, 4)),  # GW_OWNER
+                bounds=bounds,
+            ):
+                return True
+            if is_shell_window(buffer.value, process_name):
+                return True
+
             found.append(
                 {
                     "handle": int(hwnd),
                     "title": buffer.value,
-                    "process_name": names.get(int(pid.value), ""),
+                    "process_name": process_name,
                     "pid": int(pid.value),
-                    "bounds": (
-                        rect.left,
-                        rect.top,
-                        rect.right - rect.left,
-                        rect.bottom - rect.top,
-                    ),
+                    "bounds": bounds,
                     "state": _state_of(user32, hwnd),
                     "monitor": 0,
                 }
@@ -175,6 +243,32 @@ class Win32WindowBackend:
 
         user32.EnumWindows(callback_type(visit), 0)
         return found
+
+
+def _is_cloaked(hwnd: int) -> bool:
+    """Whether DWM is hiding this window.
+
+    UWP applications leave `ApplicationFrameHost` windows behind that are
+    visible by every ordinary test and are not on screen — the owner's listing
+    on 2026-08-05 showed one at (-25600, -25600). Cloaking is the attribute that
+    actually distinguishes them; position does not, because a legitimately
+    off-screen window is a different thing.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        cloaked = ctypes.c_int(0)
+        # DWMWA_CLOAKED = 14
+        result = ctypes.windll.dwmapi.DwmGetWindowAttribute(  # type: ignore[attr-defined]
+            wintypes.HWND(hwnd),
+            14,
+            ctypes.byref(cloaked),
+            ctypes.sizeof(cloaked),
+        )
+        return result == 0 and cloaked.value != 0
+    except Exception:  # noqa: BLE001 - an unanswerable probe means "not cloaked"
+        return False
 
 
 def _state_of(user32: Any, hwnd: int) -> str:
@@ -235,6 +329,51 @@ class WindowDiscovery:
 
     backend: WindowBackend = field(default_factory=Win32WindowBackend)
     sensitive: SensitiveTargets = field(default_factory=SensitiveTargets)
+    #: Tokens minted for windows this discovery has listed, keyed by handle.
+    #: Never exposed; `resolve` is the only way back out.
+    _refs: dict[int, str] = field(default_factory=dict, repr=False)
+
+    def _ref_for(self, handle: int) -> str:
+        """The stable token for a window, minted on first sight.
+
+        Stable across listings, so the model is not handed a new name for the
+        same window every time it looks. Opaque, and never the raw handle: a
+        handle is a number that could be guessed or incremented into a window
+        that was never listed, whereas a token exists only because Jarvis
+        listed the window it refers to.
+        """
+        existing = self._refs.get(handle)
+        if existing is not None:
+            return existing
+        minted = f"win-{secrets.token_hex(4)}"
+        self._refs[handle] = minted
+        return minted
+
+    def resolve(self, ref: str) -> int:
+        """The handle a reference names, or a clear refusal.
+
+        Both failures matter and are different. A token that was never minted
+        means the caller invented one — the model naming a window it has not
+        listed — and a token whose window has since closed means the desktop
+        moved on. Neither may fall through to "whatever is there now", which is
+        exactly how the wrong window got moved on 2026-08-05.
+        """
+        # `_refs` is keyed by handle, so search it by value: the map is small
+        # (one entry per window seen this session) and this keeps one source of
+        # truth rather than two dictionaries that can disagree.
+        handle = next((h for h, token in self._refs.items() if token == ref), None)
+        if handle is None:
+            raise KeyError(
+                f"'{ref}' is not a window Jarvis has listed. Call window.list "
+                "first and use one of the references it returns."
+            )
+        if not any(window.handle == handle for window in self.list_windows()):
+            self._refs.pop(handle, None)
+            raise KeyError(
+                "that window has been closed since it was listed, so nothing "
+                "was done. Call window.list again to see what is open now."
+            )
+        return handle
 
     @property
     def available(self) -> bool:
@@ -273,6 +412,7 @@ class WindowDiscovery:
                     state=WindowState.parse(str(entry.get("state", "normal"))),
                     monitor=int(entry.get("monitor", 0)),
                     sensitive=not verdict.allowed,
+                    ref=self._ref_for(int(entry.get("handle", 0))),
                 )
             )
         _LOG.debug("listed %d window(s)", len(windows))

@@ -128,17 +128,24 @@ def _tools(windows, sensitive=None):
     controller = WindowController(
         discovery=discovery, backend=actions, secure_desktop=lambda: False
     )
-    return WindowListTool(discovery), WindowArrangeTool(controller), actions
+    return WindowListTool(discovery), WindowArrangeTool(controller), actions, discovery
+
+
+def _first_ref(discovery) -> str:
+    """Name a window the way the model does: by listing it first."""
+    return discovery.list_windows()[0].ref
 
 
 def test_arranging_a_sensitive_window_is_a_declared_failure() -> None:
     """Not a crash, and not a silent no-op."""
-    _, arrange, actions = _tools([_window(process_name="1Password.exe")])
+    _, arrange, actions, discovery = _tools([_window(process_name="1Password.exe")])
 
     with pytest.raises(ToolFailure) as raised:
         arrange.run(
             ToolContext(),
-            WindowArrangeInput(position=0, action=WindowArrangeAction.MAXIMISE),
+            WindowArrangeInput(
+                window=_first_ref(discovery), action=WindowArrangeAction.MAXIMISE
+            ),
         )
 
     assert raised.value.code == "sensitive_window"
@@ -148,7 +155,7 @@ def test_arranging_a_sensitive_window_is_a_declared_failure() -> None:
 
 def test_the_listing_withholds_a_sensitive_title_at_the_tool_boundary() -> None:
     """The boundary the model actually reads, not the one inside discovery."""
-    listing, _, _ = _tools([_window(process_name="bitwarden.exe", title="my vault")])
+    listing, _, _, _ = _tools([_window(process_name="bitwarden.exe", title="my vault")])
 
     execution = listing.run(ToolContext(), WindowListInput())
 
@@ -161,11 +168,13 @@ def test_a_window_that_ignored_the_request_is_reported_unverified() -> None:
     """`succeeded` requires verification, all the way out through the tool."""
     from jarvis.core.tools.contract import Verification
 
-    _, arrange, _ = _tools([_window(state="normal")])
+    _, arrange, _, discovery = _tools([_window(state="normal")])
 
     execution = arrange.run(
         ToolContext(),
-        WindowArrangeInput(position=0, action=WindowArrangeAction.MAXIMISE),
+        WindowArrangeInput(
+            window=_first_ref(discovery), action=WindowArrangeAction.MAXIMISE
+        ),
     )
 
     assert execution.verification is Verification.UNVERIFIED
@@ -177,7 +186,7 @@ def test_a_window_that_ignored_the_request_is_reported_unverified() -> None:
 # =========================================================================
 def test_move_without_geometry_is_refused_at_the_schema() -> None:
     with pytest.raises(ValueError) as raised:
-        WindowArrangeInput(position=0, action=WindowArrangeAction.MOVE)
+        WindowArrangeInput(window="win-abc", action=WindowArrangeAction.MOVE)
     assert "snap_left" in str(raised.value), "say what to use instead (ADR-0010)"
 
 
@@ -185,10 +194,19 @@ def test_geometry_on_a_non_move_action_is_refused() -> None:
     """Otherwise it is silently ignored, which reads as the action having worked."""
     with pytest.raises(ValueError):
         WindowArrangeInput(
-            position=0, action=WindowArrangeAction.MAXIMISE, x=0, y=0, width=10, height=10
+            window="win-abc",
+            action=WindowArrangeAction.MAXIMISE,
+            x=0,
+            y=0,
+            width=10,
+            height=10,
         )
 
 
 def test_there_is_no_title_parameter() -> None:
     assert "title" not in WindowArrangeInput.model_fields
-    assert "position" in WindowArrangeInput.model_fields
+    assert "window" in WindowArrangeInput.model_fields
+    assert "position" not in WindowArrangeInput.model_fields, (
+        "a position is an index into a list that reorders; that is what moved "
+        "the wrong window on 2026-08-05"
+    )

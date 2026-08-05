@@ -634,8 +634,13 @@ If you use something else, name it and I'll add it.
 
 ## 4.2 — Move a window
 
-**Say:** *"put my browser on the left half of the screen"*, or *"minimise the
-second window"*, or *"maximise window 3"*.
+**Say:** *"put my browser on the left half of the screen"*, or *"minimise
+Settings"*, or *"maximise my IDE"*. Name the **application**, not a number —
+Jarvis matches your words against the application name first and the title
+second, and then uses a reference that cannot drift.
+
+**Try a two-part request too:** *"put my IDE on the left and Settings on the
+right"*. Both should land correctly. That is the case that used to fail.
 
 **You should see:** it does it, and says what it did — naming the application and
 where it ended up. Snapping works out the geometry from your actual screen, so
@@ -663,32 +668,59 @@ silently doing nothing.
 **Tell me:** if anything moves in either case. That would be a real security
 defect, not a rough edge.
 
-## 4.4 — The defect the lab caught, so you know what to watch for ⭐
+## 4.4 — Three bugs you found, and what changed ⭐
 
-Worth knowing because the symptom is confusing if it ever comes back.
+You reported all three on 2026-08-05. They were one root cause plus noise.
 
-`EnumWindows` returns windows in **z-order**, so acting on a window *reorders the
-list*. The live lab opened its own Notepad window, minimised it, and then
-reported:
+### It moved the wrong window
 
-```
-asked 'Antigravity IDE.exe' to become minimised
-```
+> Sir: move my code editor anti-gravity to the left half of the screen
+> Jarvis: Got it — your Antigravity IDE window is now snapped to the left half.
+> **[confirmed by a tool]** — *it moved the Jarvis window*
 
-It had verified against a completely different window — and gone on to move my
-IDE. A position is how a *person* names a window in a list they were just shown;
-it is not an identity, because the list doesn't hold still.
+`window.arrange` took a **position in the last listing**. But `EnumWindows`
+returns z-order, so acting on any window reorders the list — by the time the call
+arrived, the position the model had chosen meant something else. It then verified
+against the window it really moved and reported success, truthfully, about the
+wrong thing. That "confirmed by a tool" was not a lie; it was a correct
+confirmation of the wrong action.
 
-**Fixed:** a position resolves to a window handle once, and everything after
-follows the handle. Re-verified live — all five actions landed on Notepad.
+Positions are right for *"play the second video"*, where **you** name the position
+and the control it buys is that a page cannot rename itself into being second.
+They are wrong for *"move my IDE"*, where you name the window and the number is
+only the model's guess at a moving target.
 
-**What this means for you:** positions go stale the moment anything moves.
-Jarvis is told to re-read the list before each arrange. If you say *"minimise
-window 2, then maximise window 4"*, the second number refers to the list **after**
-the first move, which may not be what you meant.
+**Fixed:** `window.list` now returns a reference per window — `win-3f9a2c01` —
+bound to that window and stable while it is open. It means the same window
+however the desktop reorders, and it cannot be forged: a window cannot mint one
+by renaming itself, and the model cannot name a window it has not listed.
 
-**Tell me:** if a multi-step window request lands somewhere unexpected. That is
-this, and it is the honest limit of positional addressing over a list that moves.
+### It said it would re-check, and then didn't
+
+> Sir: Put my notepad on the left half of the screen.
+> Jarvis: Let me take another look at your current windows...
+> **[from the local model]** — *no tool ran*
+
+That one was my fault directly. I had written "call window.list again before each
+arrange" into the tool description, and the model narrated the instruction
+instead of following it. With stable references there is nothing to re-check, so
+the instruction is gone and there is nothing to narrate.
+
+### It listed eleven windows where you had four
+
+Program Manager, Windows Input Experience, Command Palette, an off-screen
+`ApplicationFrameHost` ghost, a zero-sized XProg window. None of them are things
+you would call open, and they made the model pick between eleven candidates when
+there were four.
+
+**Fixed:** filtered on Win32 attributes — no caption, DWM-cloaked, tool window,
+owned, or zero area — rather than on a list of names, which would be both
+incomplete and defeatable. Measured on your desktop afterwards: **11 → 3**
+(Antigravity IDE, Settings, File Explorer).
+
+**Tell me:** if something you *do* want to arrange has gone missing from the
+list. Filtering too hard is the failure mode this fix could have introduced, and
+it would look like the window simply not being there.
 
 ## 4.5 — Optional: run the live window lab yourself
 
@@ -707,7 +739,7 @@ created. Your own windows are read, never touched.
 python -m pytest
 ```
 
-**You should see:** `1220 passed, 2 skipped`.
+**You should see:** `1229 passed, 2 skipped`.
 
 ## Still to come in stage 4
 
