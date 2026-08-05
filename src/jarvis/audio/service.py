@@ -122,7 +122,19 @@ class VoiceService:
             on_state=on_state,
             on_level=on_level,
             # ADR-0016 criterion 2: never on until enrolment has been measured.
-            always_listening=bool(wake_settings.always_listening and wake_settings.enrolled),
+            # Not gated on `enrolled` any more, and the gate was the reason
+            # turning always-listening on had no effect: enrolment is the
+            # deferred half of ADR-0016 (the personal verifier and its recording
+            # flow were never built), so `enrolled` is always false and the
+            # setting could never take.
+            #
+            # Enrolment was never a prerequisite for this. What ships is the
+            # pretrained "Hey Jarvis" model, which needs no enrolment and was
+            # measured during Phase 1 acceptance — 0.994–0.998 on the phrase,
+            # and no false wakes across extended ordinary conversation. A
+            # personal verifier would sit *on top* of that as an improvement,
+            # not underneath it as a precondition.
+            always_listening=bool(wake_settings.always_listening),
         )
 
     # -- status ------------------------------------------------------------
