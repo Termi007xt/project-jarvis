@@ -432,25 +432,21 @@ class JarvisCore:
                 "approved browser to automate."
             )
 
-        # ADR-0019 Option B, adopted 2026-08-04 after Option A collided with
-        # daily use: a profile *inside* the user's Brave data directory shares
-        # one browser process with their personal profile, so a launch made
-        # while their Brave was open was handed to that process and no
-        # automation port ever opened. A separate user-data directory gets its
-        # own process and coexists with whatever the user has open.
+        # ADR-0019 Option D, chosen by the owner on 2026-08-04 after using both
+        # isolated options: automation drives the owner's **own** Brave profile.
         #
-        # It also puts the profile in the vault, which is what ADR-0019's
-        # criterion 4 asked for and Option A could not give: "delete all my
-        # data" now reaches the browser profile by construction (NFR-025).
-        profile_root = self.paths.root / "browser" / "brave-profile"
-        profile_root.mkdir(parents=True, exist_ok=True)
-
+        # This is a deliberate, recorded departure from FR-056, taken by the
+        # person whose accounts are at stake and after the risk was put to them
+        # in writing. What it buys is one browser window instead of two and no
+        # second set of logins. What it costs is the isolation boundary: any
+        # action a page induces executes as the signed-in user against every
+        # service they are signed into. See ADR-0019 for the full reasoning and
+        # the compensating controls this makes load-bearing.
         automation_entry = replace(
             brave,
-            app_id="brave_jarvis_profile",
+            app_id="brave_default_profile",
             fixed_arguments=(
                 *brave.fixed_arguments,
-                f"--user-data-dir={profile_root}",
                 f"--profile-directory={DEDICATED_BROWSER_PROFILE}",
             ),
         )

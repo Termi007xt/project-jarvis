@@ -1,6 +1,6 @@
 # ADR-0019: Browser Profile Isolation
 
-- **Status:** **Accepted — Option B** (superseded Option A on 2026-08-04, same day, after Option A failed in daily use; see "Revised" below)
+- **Status:** **Accepted — Option D, the owner's own profile.** Supersedes Option A and Option B, both tried on 2026-08-04. **This is a recorded departure from FR-056**; see "Revised again" below.
 - **Date:** 2026-08-01, decided 2026-08-04
 - **Deciders:** Project owner
 - **Phase:** 2
@@ -29,6 +29,44 @@ Point Brave at an entirely separate user-data directory under the vault (`Projec
 Use `playwright.chromium.launch_persistent_context()` with Playwright's bundled Chromium rather than the actual Brave executable.
 **Pros:** best-documented, most reliable Playwright automation surface — this is Playwright's native use case, with the fewest CDP-attachment surprises.
 **Cons:** directly contradicts §12.1's explicit "Dedicated persistent Brave profile" and `PROJECT_INPUTS.md`'s `dedicated_browser_profile: Jarvis` — the product has already committed to Brave specifically (plausibly for its ad/tracker-blocking defaults, which matter for a browser the agent controls), so silently substituting bundled Chromium would be a PRD deviation requiring its own justification.
+
+## Revised again 2026-08-04 — Option D: the owner's own profile
+
+**Decision.** Automation drives the owner's existing Brave profile (`Default`). No dedicated profile, no separate user-data directory.
+
+**This departs from FR-056**, which requires a dedicated "Jarvis" profile. It is recorded here as a deliberate, owner-made exception rather than an oversight, and FR-056 should be read as unmet until this is revisited.
+
+### Why the owner chose it
+
+Both isolated options were built and used. Each produced a worse experience than the requirement anticipated:
+
+- **Option A** collided with Chromium's single-instance model (below), so automation failed whenever their own Brave was open.
+- **Option B** worked, but produced **two browser windows and two sets of logins** — "open YouTube" ran through the Phase 1 launcher into their personal profile while "search YouTube" ran through the automation session into the isolated one. The isolation read as a malfunction rather than a protection.
+
+The owner asked directly what the worst case was and what would cause it, was given the answer below in writing, and reaffirmed the choice.
+
+### The risk, stated plainly, because it is now accepted rather than mitigated
+
+Browser session cookies are **ambient authority**: the browser attaches them to every request, and a site cannot tell an action taken by automation from one taken by the user. The approval dialog governs whether Jarvis may automate the browser; it cannot govern what an individual click means to a logged-in service.
+
+The concrete failure is: text that Jarvis *reads* — a video description, a comment, a search result, a page it was asked to summarise — induces the planner to propose an action, and that action executes as the signed-in user. Against a dedicated profile the blast radius is whatever the user deliberately signed that profile into. Against their own profile it is every service they have ever signed into, including ones they have forgotten.
+
+**Today the exposure is small**, because the only automation tools are `youtube.search` and `youtube.play`, and `play` takes an ordinal rather than anything a page controls. The exposure is not static: it grows with every tool added in stages 4–5 and in Phases 3 and 5.
+
+### What this makes load-bearing
+
+Isolation was the one control that did not depend on the model behaving. Removing it promotes the remaining controls from defence-in-depth to primary defence, and they should be treated accordingly:
+
+1. **Positional selection** (`ObservedList.select`) — the only structural control left. No tool may resolve an action target from page-supplied text. `tests/security/test_prompt_injection.py` enforces this and must not be relaxed.
+2. **No tool may take a free-form URL or selector from the model** and then *act* on the resulting page. Navigation the user can see is one thing; automated interaction on an arbitrary model-chosen page is another, and it is now the specific thing that must not be built.
+3. **Medium-risk approval stays medium-risk.** ADR-0027 gives `browser.automate_logged_in` once/task/deny and no standing allow. That restriction is now doing more work than when it was written, and must not be widened to "always" as a convenience.
+4. **This decision is revisited before stage 4 ships screen capture and filesystem reads**, and again before any tool that clicks an arbitrary element.
+
+### Option D's own cost, which the owner accepts
+
+Chromium's single-instance model still applies: with their Brave already running, a launch is handed to the existing process and no debugging port opens, so automation reports that it could not open the browser. Closing Brave first remains necessary. Option D removes the two-window confusion; it does not remove that.
+
+---
 
 ## Revised 2026-08-04 — Option A was tried and replaced by Option B
 

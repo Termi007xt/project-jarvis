@@ -57,12 +57,14 @@ _LOG = logging.getLogger(__name__)
 #: against the real page (`tools/browser-lab/test_playwright_attach.py`).
 RESULT_SELECTOR = "ytd-video-renderer"
 
-#: The dedicated automation profile (FR-056, ADR-0019 Option A). Fixed by
-#: `PROJECT_INPUTS.md` as `automation.dedicated_browser_profile: Jarvis`, and
-#: kept as a constant here rather than a config field until something actually
-#: needs it to vary — a setting nobody changes is a setting that drifts out of
-#: agreement with the profile the user has signed into.
-DEDICATED_BROWSER_PROFILE = "Jarvis"
+#: Which Brave profile automation drives.
+#:
+#: `"Default"` since 2026-08-04, by owner decision: automation runs in their own
+#: profile so there is one browser window and one set of logins. This is a
+#: recorded departure from FR-056's dedicated profile — the reasoning, the risk
+#: and the controls it makes load-bearing are in ADR-0019, which should be read
+#: before this is changed back or forward.
+DEDICATED_BROWSER_PROFILE = "Default"
 
 #: How long to wait for the browser to open its debugging port before giving up.
 CDP_READY_TIMEOUT_SECONDS = 20.0
