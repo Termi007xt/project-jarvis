@@ -67,16 +67,45 @@ class BrowserWorkspace:
         self._adapter = None
         self._session = None
         self._session_factory = session_factory
+        #: Bumped by every `close()`. An open that started before the last close
+        #: is one nobody is waiting for any more — see `_open`.
+        self._generation = 0
 
     def set_adapter(self, adapter) -> None:
         """Inject an adapter directly. Used by tests and by an open session."""
         self._adapter = adapter
 
     def _open(self) -> None:
+        """Open a session, and hand it back only if it is still wanted.
+
+        `ToolInvoker._run_with_timeout` abandons the *future*, not the thread
+        running it. When `youtube.search` exceeded its 90s timeout on
+        2026-08-05, the invoker reported `timed_out` and moved on while this
+        method kept going — and completed the attach six seconds after Jarvis
+        had shut down. `close()` had already run and found `self._session` still
+        `None`, because the assignment below had not happened yet, so nothing
+        closed that browser. It was left running with a debugging port open on
+        loopback and no Jarvis left to close it.
+
+        ADR-0031 treats that teardown as a security control rather than
+        tidiness, which makes the abandoned case worth handling explicitly: a
+        session that finishes opening into a workspace that has since closed is
+        closed straight away instead of being stored.
+        """
         from jarvis.toolbox.youtube import YouTubeAdapter
 
+        opened_at_generation = self._generation
         session = self._session_factory()  # type: ignore[misc]
         session.__enter__()
+
+        if opened_at_generation != self._generation:
+            _LOG.info("the browser opened after it was no longer wanted; closing it")
+            try:
+                session.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 - teardown must not mask the cause
+                _LOG.warning("the abandoned browser did not close cleanly", exc_info=True)
+            return
+
         self._session = session
         self._adapter = YouTubeAdapter(page=session.page())
 
@@ -136,6 +165,9 @@ class BrowserWorkspace:
         listening on a debugging port, which is the residual risk ADR-0031
         bounds by keeping the port session-scoped.
         """
+        # Bumped whether or not there is a session to close, because the case
+        # that leaks is precisely the one where there is not one *yet*.
+        self._generation += 1
         session, self._session = self._session, None
         self._adapter = None
         if session is not None:

@@ -30,22 +30,28 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from jarvis.toolbox.launch import (
     EPHEMERAL_PORT_RANGE,
     ApplicationEntry,
     launch_argv,
+    process_running,
 )
 
 __all__ = [
     "BraveCdpSession",
     "BrowserUnavailable",
     "PlaywrightPageDriver",
+    "brave_user_data_dir",
+    "existing_debug_port",
     "free_ephemeral_port",
     "RESULT_SELECTOR",
 ]
@@ -70,6 +76,12 @@ DEDICATED_BROWSER_PROFILE = "Default"
 CDP_READY_TIMEOUT_SECONDS = 20.0
 _CDP_POLL_SECONDS = 0.25
 
+#: A port recalled from `DevToolsActivePort` belongs to a browser that is
+#: already running, so it either answers at once or the file is stale. There is
+#: nothing to wait for, and waiting is the failure this whole path exists to
+#: remove.
+_RECALLED_PORT_TIMEOUT_SECONDS = 2.0
+
 
 class BrowserUnavailable(RuntimeError):
     """The browser could not be started or attached to."""
@@ -88,6 +100,50 @@ def free_ephemeral_port() -> int:
     if not low <= port <= high:  # pragma: no cover - the OS does not do this
         raise BrowserUnavailable(f"the OS offered an unusable port: {port}")
     return port
+
+
+def brave_user_data_dir(entry: ApplicationEntry) -> Path | None:
+    """Where the profile this entry drives keeps its state.
+
+    Taken from the entry's own `--user-data-dir` when it sets one, and otherwise
+    Chromium's default location for Brave. Only ever used to *read* the port
+    file below.
+    """
+    for argument in entry.fixed_arguments:
+        if argument.startswith("--user-data-dir="):
+            return Path(argument.split("=", 1)[1])
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    return Path(local_app_data) / "BraveSoftware" / "Brave-Browser" / "User Data"
+
+
+def existing_debug_port(user_data_dir: Path | None) -> int | None:
+    """The port a *running* Brave already has open, if it has one.
+
+    Chromium writes the live debugging port to `DevToolsActivePort` in the user
+    data directory when it starts with one, and removes the file when it exits
+    cleanly. That makes a browser Jarvis started earlier re-attachable after
+    Jarvis itself restarts — the difference between "restarting Jarvis fixed it"
+    and "restarting Jarvis left the browser unusable until I closed Brave too".
+
+    The file is a hint and nothing more. A stale one survives a crash, so the
+    caller must confirm the port actually answers before trusting it. Reading it
+    does not widen ADR-0031 constraint 1 either: the port is still ephemeral and
+    still chosen per browser start, it is simply being *recalled* rather than
+    chosen again.
+    """
+    if user_data_dir is None:
+        return None
+    try:
+        first_line = (user_data_dir / "DevToolsActivePort").read_text(
+            encoding="utf-8"
+        ).splitlines()[0]
+        port = int(first_line.strip())
+    except (OSError, ValueError, IndexError):
+        return None
+    low, high = EPHEMERAL_PORT_RANGE
+    return port if low <= port <= high else None
 
 
 def _cdp_banner(port: int, timeout_seconds: float) -> dict[str, Any] | None:
@@ -116,13 +172,24 @@ class BraveCdpSession:
         entry: ApplicationEntry,
         *,
         ready_timeout_seconds: float = CDP_READY_TIMEOUT_SECONDS,
+        already_running: "Callable[[], bool] | None" = None,
+        launcher: "Callable[[tuple[str, ...]], Any] | None" = None,
     ) -> None:
         self._entry = entry
         self._ready_timeout = ready_timeout_seconds
+        self._already_running = already_running or self._brave_is_running
+        self._launch = launcher or launch_argv
         self._port: int | None = None
         self._playwright: Any = None
         self._browser: Any = None
         self._page: "PlaywrightPageDriver | None" = None
+        #: Whether *this* session started the browser. Decides whether teardown
+        #: may close it — see `__exit__`.
+        self._started_the_browser = False
+
+    def _brave_is_running(self) -> bool:
+        names = self._entry.verify_process_names or ("brave.exe",)
+        return process_running(names)
 
     @property
     def attached(self) -> bool:
@@ -153,41 +220,114 @@ class BraveCdpSession:
                 'browser. Install the automation extra: pip install -e ".[automation]"'
             ) from exc
 
+        # Asked *before* launching, because the answer decides whether launching
+        # can possibly help. `--remote-debugging-port` is a startup flag: a
+        # second `brave.exe` handed to a running instance forwards its command
+        # line and exits, and no port is ever opened. Waiting the full timeout to
+        # learn that costs the user 20 seconds of silence to reach a conclusion
+        # available in microseconds — and, worse, the pointless launch pulls
+        # their browser window to the foreground first.
+        if self._already_running():
+            recalled = existing_debug_port(brave_user_data_dir(self._entry))
+            # Confirmed, never assumed: the file outlives a crash, and a stale
+            # port would otherwise be attached to as though it were live.
+            banner = (
+                _cdp_banner(recalled, _RECALLED_PORT_TIMEOUT_SECONDS)
+                if recalled is not None
+                else None
+            )
+            if banner is None:
+                raise BrowserUnavailable(
+                    "Brave is already open, and a browser that is already "
+                    "running cannot be given an automation port — that setting "
+                    "only applies when it starts. Close Brave and ask again and "
+                    "it will reopen with your tabs restored, or let Jarvis open "
+                    "Brave in the first place and it stays available all session."
+                )
+            # A browser we did not start. Attach to it, but never close it.
+            self._port = recalled
+            self._started_the_browser = False
+            self._attach(banner, launched_at=time.monotonic())
+            return self
+
+        self._started_the_browser = True
         self._port = free_ephemeral_port()
         argv = (
             self._entry.target,
             *self._entry.fixed_arguments,
             f"--remote-debugging-port={self._port}",
         )
-        launch_argv(argv)  # the one authorised call site (ADR-0029)
+        launched_at = time.monotonic()
+        self._launch(argv)  # the one authorised call site (ADR-0029)
 
         banner = _cdp_banner(self._port, self._ready_timeout)
         if banner is None:
             raise BrowserUnavailable(
                 "the browser did not open its automation port within "
-                f"{self._ready_timeout:.0f}s. If Brave was already running, its "
-                "command line was handed to the existing instance and no port "
-                "was opened — close Brave and try again."
+                f"{self._ready_timeout:.0f}s, so there is nothing to attach to. "
+                "Nothing was searched."
             )
 
+        self._attach(banner, launched_at=launched_at, port_open_at=time.monotonic())
+        return self
+
+    def _attach(
+        self,
+        banner: dict[str, Any],
+        *,
+        launched_at: float,
+        port_open_at: float | None = None,
+    ) -> None:
+        """Connect Playwright to a port that has already been confirmed open."""
+        from playwright.sync_api import sync_playwright
+
+        port_open_at = launched_at if port_open_at is None else port_open_at
         self._playwright = sync_playwright().start()
+        driver_at = time.monotonic()
         # connect_over_cdp, never launch: Playwright is a client here.
         self._browser = self._playwright.chromium.connect_over_cdp(
             f"http://127.0.0.1:{self._port}"
         )
-        _LOG.info("attached to %s over CDP", banner.get("Browser"))
-        return self
+        attached_at = time.monotonic()
+
+        # Per phase, not just a total. On 2026-08-05 this path took 96s against
+        # a 90s tool timeout, and the log recorded only "attached" — which said
+        # that it was slow and nothing about *where*. Every phase was
+        # individually measured as fast afterwards, so the total and the parts
+        # disagreed and the log could not settle it. Timing each boundary is what
+        # makes the next occurrence name its own cause (`tools/browser-lab/
+        # test_attach_cost.py` holds the measurements).
+        _LOG.info(
+            "attached to %s over CDP in %.1fs "
+            "(port wait %.1fs, driver start %.1fs, attach %.1fs); "
+            "browser started by Jarvis: %s",
+            banner.get("Browser"),
+            attached_at - launched_at,
+            port_open_at - launched_at,
+            driver_at - port_open_at,
+            attached_at - driver_at,
+            self._started_the_browser,
+        )
 
     def __exit__(self, *_exc: object) -> None:
-        # Unconditional: a browser left listening on a debugging port after a
-        # failed session is exactly the residual risk ADR-0031 bounds.
-        for closer in (self._browser, self._playwright):
-            if closer is None:
-                continue
+        # Detaching is unconditional: a session left connected to a debugging
+        # port after a failure is exactly the residual risk ADR-0031 bounds.
+        #
+        # *Closing the browser* is not. Jarvis closes what Jarvis started; a
+        # browser that was already running when we attached is the user's, and
+        # ending a Jarvis session is not a reason to take their tabs with it.
+        # Dropping the Playwright connection without closing leaves them exactly
+        # as they were.
+        if self._browser is not None and self._started_the_browser:
             try:
-                closer.close() if closer is self._browser else closer.stop()
+                self._browser.close()
             except Exception:  # noqa: BLE001 - teardown must not mask the cause
                 _LOG.warning("browser teardown did not complete cleanly", exc_info=True)
+        if self._playwright is not None:
+            try:
+                self._playwright.stop()
+            except Exception:  # noqa: BLE001
+                _LOG.warning("the automation driver did not stop cleanly", exc_info=True)
         self._browser = None
         self._playwright = None
         self._page = None

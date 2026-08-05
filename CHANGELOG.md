@@ -9,8 +9,34 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 In progress. Stage 0 (measure and unblock) is complete; no automation capability
 has shipped yet.
 
+### Fixed
+
+- **Searching YouTube stopped working once automation moved to the owner's own
+  Brave profile.** A browser that is already running cannot be given an
+  automation port — `--remote-debugging-port` only applies when Chromium starts,
+  and a second `brave.exe` hands its command line to the running instance and
+  exits. Automation previously drove a dedicated profile that was rarely already
+  open, so this case was rare; pointing it at a profile the owner uses all day
+  made it the normal case. Jarvis now checks before launching, so it answers in
+  about a second instead of waiting 20s for a port that cannot appear, and says
+  which two things actually resolve it.
+- **Restarting Jarvis no longer leaves browser automation dead until Brave is
+  closed too.** A browser Jarvis started earlier is re-attached by recalling the
+  port Chromium records in its own `DevToolsActivePort` file, confirmed live
+  before it is trusted, since that file outlives a crash.
+- **Quitting Jarvis no longer closes a browser it did not open.** Teardown always
+  detaches, but only closes browsers Jarvis started itself.
+
 ### Security
 
+- **A browser could be left listening on a debugging port with Jarvis gone.**
+  When a tool exceeds its timeout the invoker abandons the *future*, not the
+  thread; an attach that completed afterwards was stored in a workspace that had
+  already shut down, so nothing ever closed it. Observed on 2026-08-05, six
+  seconds after the application exited. A session that finishes opening into a
+  closed workspace is now closed immediately. ADR-0031 treats that teardown as a
+  security control rather than tidiness, which makes this a leak of the control
+  itself.
 - **A web page could break out of the wrapper that quotes it.** Content observed
   from outside — pages, filenames, documents — is enclosed in delimiters that
   tell the model it is data and authorises nothing. Those delimiters are fixed

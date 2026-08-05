@@ -495,4 +495,112 @@ python -m pytest
 
 ---
 
+# Fix round — "is the YouTube search tool broken?" (2026-08-05)
+
+Reported: search opened YouTube and then did nothing, GPU busy, needing a Jarvis
+restart. It had worked the day before.
+
+**What it actually was.** Not the search tool. `--remote-debugging-port` is a
+*startup* flag: when Brave is already running, a second `brave.exe` hands its
+command line to the running instance and exits, and no automation port is ever
+opened. Jarvis then waited the full 20s for a port that could not appear, twice,
+and gave up. Until 2026-08-04 automation drove a dedicated profile that was
+almost never already open, so the launch cold-started Brave and the port
+appeared in under a second. Switching to your own profile (ADR-0019 Option D)
+inverted that: your browser is essentially always running. **The regression was
+a direct consequence of the profile change, not of the search tool.**
+
+## F.1 — The common case now works instead of waiting
+
+Have Brave **open** with a few tabs. Then: *"search rtx 5070 on youtube"*.
+
+**You should see:** a refusal in about a second — not a 20-second silence — that
+says Brave is already open, that the automation port only applies when it
+starts, and names the two ways forward (close Brave and ask again, or let Jarvis
+open Brave in the first place).
+
+**This is still a refusal.** It is a fast, honest one instead of a slow, silent
+one. Whether it should stay a refusal is the decision in **F.5** below.
+
+## F.2 — Letting Jarvis open Brave
+
+Close Brave completely. Then: *"search rtx 5070 on youtube"*, then *"play the
+second video"*.
+
+**You should see:** Brave opens with your profile and logins, the search runs,
+and the second result plays. This is the path that works end to end.
+
+## F.3 — Restarting Jarvis no longer kills automation
+
+With Brave still open **from F.2**, quit Jarvis from the tray and start it
+again. Then: *"search best microphones on youtube"*.
+
+**You should see:** it works, without reopening Brave. Jarvis now recalls the
+port from Chromium's own `DevToolsActivePort` file and re-attaches to the
+browser it started earlier. Before this fix, restarting Jarvis left browser
+automation dead until Brave was closed too.
+
+**Then quit Jarvis and check your browser is still open.** Jarvis closes only
+browsers it started; one it merely attached to is left exactly as it was. If
+quitting Jarvis ever closes your windows, that is a bug — tell me at once.
+
+## F.4 — What the log will now tell us
+
+The 96-second attach that caused the timeout is **not explained yet**. I
+measured every phase and they are all fast — 0.01s to 0.89s across five tab
+arrangements (`tools/browser-lab/test_attach_cost.py`), against 96s observed.
+Three hypotheses were tested and all three were wrong: tab count, tab weight,
+and attaching during a cold start.
+
+So rather than guess a fourth, `BraveCdpSession` now logs each phase separately:
+
+```
+attached to Chrome/151... over CDP in 1.4s
+  (port wait 1.1s, driver start 0.2s, attach 0.1s); browser started by Jarvis: True
+```
+
+**If a search is ever slow again, send me that line.** It names which phase, and
+that ends the guessing.
+
+## F.5 — A decision I need from you
+
+Under Option D, F.1's refusal is the *normal* case: you open Brave yourself in
+the morning, so Jarvis can never attach to it. Three ways out, none free:
+
+1. **Leave it.** Say "close Brave" when you want automation. Costs nothing,
+   annoys you daily.
+2. **Let Jarvis offer to restart Brave** — close it and reopen with your tabs
+   restored, as an action you approve each time. Closing your browser is
+   consequential, so it would never be silent.
+3. **Go back to a dedicated profile** for automation only. Always works, and
+   costs the thing you asked for: one browser, one set of logins.
+
+I have not chosen for you. **Tell me which.**
+
+## F.6 — A separate defect the audit log proved
+
+Your log contains, verbatim:
+
+```
+approval scope 'task' rejected for browser.automate_logged_in
+error: "scope 'task' requires a task_id"
+```
+
+The "for this task" button on the approval prompt **cannot ever be granted** for
+anything you start by talking, because a conversation turn has no task id. It
+silently falls back to "once" — which is exactly why you are asked every single
+time. This is the Phase 1 defect class again: an enabled control that cannot
+work. **Not fixed in this round**; it is next, and it is the real answer to
+"please add an allow-always option".
+
+## F.7 — Confirm the suite
+
+```powershell
+python -m pytest
+```
+
+**You should see:** `1122 passed, 2 skipped`.
+
+---
+
 <!-- Stage 4 section is added here when stage 4 completes. -->
