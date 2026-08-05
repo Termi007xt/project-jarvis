@@ -1,7 +1,7 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-04 (Phase 2 stage 0)
+- **Last updated:** 2026-08-05 (Phase 2 stage 3 — six defects from a live session, fixed)
 - **Current branch:** `feat/PHASE-2-development`. Phase 1 **is already merged** —
   `main` is at `b9e73e0`, merge of PR #2.
 - **Version:** `0.2.0.dev0`
@@ -10,8 +10,9 @@
   Work items: `docs/BACKLOG.md` §5.
 - **Delivery mode:** **checkpoint after every stage** (decided 2026-08-04, and
   deliberately *not* Phase 1's continuous run — see the plan §2.1/§2.2).
-- **Overall status:** Green. `python -m pytest` → **916 passed, 2 skipped**,
-  exit 0, with the new `automation` extra installed. Nothing is blocked.
+- **Overall status:** Green. `python -m pytest` → **1156 passed, 2 skipped**,
+  exit 0 (2026-08-05). `tests/security` → 299 passed, 1 skipped.
+  `python -m jarvis.main --check` → exit 0, ten tools registered. Nothing is blocked.
 
 > **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
 > add another `-q` — two of them suppress pytest's final `N passed` line, which
@@ -140,8 +141,82 @@ that change what the product can do:
 
 ## In Progress
 
-**Phase 2, stage 0 — "measure and unblock".** Nothing in stage 0 is a feature;
-all of it gates something. Plan: `docs/phase-plans/PHASE-02-PLAN.md` §5.
+### 2026-08-05 — the session that found six defects, and what changed
+
+The owner asked Jarvis to open YouTube and search "best monitors". The whole
+sequence is in `logs/audit.jsonl` and it is the most useful thing in this
+document, because the first step is what broke the second and the tests were
+green throughout.
+
+| Local | What the audit log records |
+|---|---|
+| 12:35:28 | `app.open(youtube)` launched Brave **without** a debugging port. Verified success. No search tool was called; the reply said *"Now searching for 'best monitors'"* anyway, labelled `[confirmed by a tool]` |
+| 12:36:24 | `youtube.search` approved, then **failed**: *"Brave is already open… cannot be given an automation port"* |
+| 12:37:36 | Identical failure. Jarvis asked the owner to quit Brave from the taskbar |
+| 12:38:30 | Owner quit Brave by hand → launched with a port, attached in 2.5s, **20 results** |
+| 12:39 | "Search a latest anime" → **no tool call at all**; the model just talked |
+| 12:42:51 | `youtube.search` **failed**: `Page.goto: Target page, context or browser has been closed` |
+
+Four approvals were requested and every one of them recorded
+`approval scope 'task' rejected — scope 'task' requires a task_id`.
+
+**Root cause, one sentence: nothing owns the browser's lifecycle.** Four code
+paths start Brave and only one leaves it automatable, so Jarvis's own first
+action made its second action impossible — and the only remedy was manual. Every
+unit test passed because every unit was correct. This is the phase's recorded
+lesson (*test the seam, not the unit*) reappearing one layer up: the seam is now
+a **resource's lifecycle across tools**, not a wire between two components.
+
+**What was fixed** (ADR-0032; tests in `tests/unit/test_browser_restart_and_tabs.py`
+and `tests/unit/test_approval_scopes_that_stick.py`):
+
+1. **`browser.restart` exists.** Jarvis had been *offering* to close and reopen
+   Brave for some time with no capability behind the offer. `WM_CLOSE` to the
+   visible windows, then poll until the process exits — asked, never killed, so
+   Chromium saves its session and the tabs return. A browser that refuses is a
+   declared failure, never a `TerminateProcess`. Its own capability: approving a
+   search is not approving the loss of someone's windows.
+2. **`browser_restart_required` is its own failure code.** Told only
+   "unavailable", the model improvised instructions for a human. The tool
+   description now names the code it answers and says not to do that.
+3. **A closed tab is replaced.** `is_alive()` asked about the *browser*, which
+   was fine; the cached tab had died and nothing looked at it. A live tab is
+   still reused, so "play the second video" lands on the page the search read.
+4. **`BrowserWorkspace` owns a thread.** Playwright's sync API is bound to its
+   creating thread; the tool executor has four workers and abandons the *thread*
+   on a timeout. Every recorded session ended with `greenlet.error: Cannot
+   switch to a different thread` from `MainThread` — meaning teardown never ran
+   and the debugging port was left open. Under ADR-0031 teardown is a security
+   control, so this was the control silently not running, every single time.
+5. **A conversation turn carries a task id**, so "Allow for this task" is
+   honoured instead of discarded. And a general rule is now asserted: a scope
+   the dialog offers must be one the engine can grant.
+6. **Browser automation may be granted "always"** (owner decision, ADR-0032).
+   Offered, never defaulted; one named capability; empty by default in code;
+   high risk still never eligible. Recorded in `THREAT_MODEL.md` §6.1 as a
+   **reduction in control**, not as a neutral convenience.
+7. **Present-tense narration is hedged.** Nothing is ever under way when Jarvis
+   speaks — a turn finishes its tools first — so "Now searching…" is false
+   either way. This is why "did any tool verify anything" could not catch it:
+   `app.open` had verified, honestly, something else entirely.
+
+**Also fixed, small but real:** the searched tab came back in light mode because
+Playwright emulates `prefers-color-scheme: light` on pages it creates.
+
+**Verified outside the suite:** the new `ctypes` window enumeration was run
+read-only against the live machine — `brave.exe` 31 processes / 1 visible
+window, `explorer.exe` 1 / 10, a non-existent process 0 / 0.
+
+**Not fixed, and worth knowing:** the browser lifecycle is still not unified.
+ADR-0032 Option 1 would have routed every browser action through one automatable
+session; the owner declined it, because it leaves a CDP port open whenever
+Jarvis opens the browser at all. So "open YouTube" then "search it" still costs
+a restart. Recorded in `ARCHITECTURE.md` §13 gap 5a.
+
+### Phase 2, stage 0 — "measure and unblock"
+
+Nothing in stage 0 is a feature; all of it gates something.
+Plan: `docs/phase-plans/PHASE-02-PLAN.md` §5.
 
 | Stage 0 item | Status |
 |---|---|
@@ -289,6 +364,54 @@ named for the property it would break.
 made idempotent, or the recovery path to take the task lock the scheduler holds.
 Reproduce with the full suite in a loop, not the single test.
 
+### Known limitation, deferred by the owner: automation wakes their other tabs
+
+**Symptom.** When Jarvis opens Brave and attaches, every other YouTube tab in
+the browser wakes and starts playing, all audible at once. Opening Brave by hand
+does not do this — the same tabs stay asleep. Reported 2026-08-05; the owner
+chose to defer it rather than hold up stage 4: *"i dont want to spend too much
+time on this, we can always look back on this later."*
+
+**Cause, measured not guessed.** `connect_over_cdp` attaches to **every page in
+the browser** — ten of ten in `tools/browser-lab/test_attach_cost.py`. Playwright
+is designed to drive a browser it owns; ADR-0019 Option D points it at one the
+owner is using, so attaching announces Jarvis to all their tabs. There is no
+Playwright option to narrow the attach. Nothing in Jarvis touches those tabs,
+which is why this cannot be fixed above Playwright.
+
+The exact Chromium step from "woken" to "playing" is **not** established.
+Autoplay is gated per origin on media engagement history, and a scratch profile
+has none, so `tools/browser-lab/test_attach_side_effects.py` cannot reproduce it
+and does not claim to. That gap does not affect the fix, because attaching to
+those tabs at all is unnecessary.
+
+**The fix is proven and not yet applied.**
+`tools/browser-lab/test_single_tab_cdp.py` drives one tab over raw CDP —
+`PUT /json/new` returns that tab's own WebSocket, which reaches it and nothing
+else. Measured against real YouTube with three decoy videos open:
+
+```
+search rtx 5070   -> 5 results, read by position
+play position 1   -> VERIFIED by video id
+decoy tabs        -> still paused, currentTime=0, all three
+```
+
+It also removes the Node driver and Playwright's thread-affinity trap (the
+2026-08-05 blank tab), and needs no synthetic click: read the id at position N
+and navigate to it, which is *more* deterministic and keeps selection strictly
+positional. `websocket-client` is installed; it is not yet in the `automation`
+extra because no product code imports it.
+
+**What is left to do:** a `jarvis.toolbox.cdp` module and a `CdpPageDriver`
+behind the existing `PageDriver` interface, then swap the session type. The
+tools, the permission checks and the positional-selection guarantee are
+unchanged. Budget one round of rough edges on real pages — it is code we own
+rather than a library.
+
+**Until then**, search and play work correctly on Playwright (verified end to
+end across two calling threads, `tools/browser-lab/test_exit_criterion_threaded.py`).
+The cost is the woken tabs, and it is loud rather than silent.
+
 **Known defects carried into Phase 2** — all in `docs/BACKLOG.md` §4.6, none of
 them silent in the product:
 
@@ -395,8 +518,29 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Stages 0, 1 and 2 are complete. Stage 3 — the browser, and the exit criterion
-— is next.**
+**Start here (2026-08-05).** The six fixes above are committed and the suite is
+green, but **none of the browser path has been exercised end to end on real
+hardware since they landed** — and this phase has now twice found that a green
+suite says nothing about the seams. In order:
+
+0. **Live-test the restart path.** With Brave open, ask for a YouTube search.
+   Expect: `youtube.search` fails `browser_restart_required` → the planner calls
+   `browser.restart` → one approval → Brave closes, reopens with tabs restored →
+   the search runs. Watch for three specific things: whether the planner
+   actually makes that second call (it has four rounds and has been observed to
+   narrate instead of acting), whether the tabs really come back, and whether
+   the new tab is dark. If the planner does not chain the calls, that is the
+   next defect and it is a planner problem, not a browser one.
+
+0a. **Then choose "Allow always"** at the approval prompt and confirm the next
+   several requests do not ask again. Check the Permissions screen lists it and
+   that revoking it there restores the prompt.
+
+0b. **Close the tab mid-session** and search again — it should open a new one
+   rather than failing.
+
+**Stages 0, 1 and 2 are complete. The rest of stage 3 — the exit criterion —
+follows.**
 
 1. **Stage 3 order:** P2-BRW-01 (the Jarvis profile — it already exists on the
    machine, created by the stage 0 spike) → P2-BRW-02 (Playwright over CDP,

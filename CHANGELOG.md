@@ -9,8 +9,74 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 In progress. Stage 0 (measure and unblock) is complete; no automation capability
 has shipped yet.
 
+### Added
+
+- **Jarvis can close and reopen the browser itself** (`browser.restart`,
+  ADR-0032). It had been offering to do this for some time — *"Closing Brave
+  briefly then reopening will restore your tabs"* — with no capability behind
+  the offer, so the only way forward was quitting Brave by hand. The browser is
+  *asked* to close rather than killed, so Chromium writes its session out and the
+  tabs come back; a browser that will not close (a page asking to confirm
+  leaving) is reported as a failure rather than forced shut, because that prompt
+  is yours to answer. Its own approval, deliberately not folded into the search
+  tools: approving a search is not approving the loss of your windows.
+- **Browser automation can be allowed once instead of every time.** "Allow
+  always" is now offered for it in the approval dialog (ADR-0032). Nothing is
+  granted automatically — you still choose it, it appears on the Permissions
+  screen, and you can revoke it there. Configured by name in
+  `permissions.always_allowable_capabilities`; no other medium-risk capability
+  is affected and high-risk ones can never be listed.
+
+### Known limitations
+
+- **Opening the browser wakes the owner's other tabs, and YouTube tabs among
+  them start playing.** Playwright attaches to every page in the browser — ten
+  of ten, measured — because it is built to drive a browser it owns, and
+  ADR-0019 Option D points it at one in daily use. There is no option to narrow
+  the attach, so this cannot be fixed above Playwright. The replacement is
+  spiked and proven (`tools/browser-lab/test_single_tab_cdp.py`: one tab over
+  raw CDP, three decoy videos left untouched) and deferred by the owner rather
+  than allowed to hold up the phase. Search and play work correctly meanwhile.
+
 ### Fixed
 
+- **Jarvis narrated commands that had already worked.** A finished action is
+  self-evidencing, and the reply policy said so — but it read the reply for a
+  question mark *before* applying that rule, and the model ends nearly every
+  completed action with an offer ("Want me to check system status?"). One
+  question mark was enough to turn "opened it" into four seconds of narration
+  about a window already on screen. A question now earns speech only when no
+  tool ran to answer it with, so a real clarification is still spoken and a
+  conversational flourish is not.
+- **"Open YouTube and search for X" opened YouTube and then could not search
+  it.** Opening YouTube launched Brave without an automation port, which is
+  precisely what stopped the search that followed — so Jarvis broke its own next
+  step and then asked you to close a browser it had opened itself, 56 seconds
+  earlier. It now restarts the browser instead of asking you to, and the tool
+  descriptions steer a request that says what to do *after* opening straight to
+  the tool that does the whole job.
+- **"Allow for this task" was discarded every time you chose it.** The dialog
+  offered it, the engine rejected it (`scope 'task' requires a task_id`) because
+  only scheduled tasks carried an id and a spoken request did not — so the
+  approval was silently downgraded to single use and you were asked again on the
+  next sentence, four times in seven minutes on 2026-08-05. A conversation turn
+  now carries its own task id, so one approval covers everything that request
+  needs. A test walks the offered scopes and grants each one, so the dialog and
+  the engine cannot drift apart again.
+- **Closing a browser tab broke every later request** with "Target page, context
+  or browser has been closed". Liveness was checked on the *browser*, which was
+  fine; the single cached tab was what had died, and nothing looked at it. A
+  closed tab is now replaced with a new one, and a live tab is still reused so
+  "play the second video" lands on the page the search just read.
+- **The tab Jarvis opened came back in light mode** among a window of dark ones,
+  because Playwright emulates `prefers-color-scheme: light` on pages it creates.
+  That emulation is now switched off.
+- **Jarvis narrated actions it had not taken** — "Now searching for best
+  monitors" while nothing had been searched, carrying the label "confirmed by a
+  tool" because an unrelated tool had verified something else. Nothing is ever
+  under way when Jarvis speaks: a turn runs its tools to completion first, so an
+  action described as in progress is false either way, and is now rewritten to
+  say what actually ran.
 - **Searching YouTube stopped working once automation moved to the owner's own
   Brave profile.** A browser that is already running cannot be given an
   automation port — `--remote-debugging-port` only applies when Chromium starts,
@@ -29,6 +95,21 @@ has shipped yet.
 
 ### Security
 
+- **Browser automation may now hold a standing grant, which is a real reduction
+  in control and is recorded as one** (ADR-0032, `THREAT_MODEL.md`). Combined
+  with ADR-0019's decision to drive the owner's own signed-in profile, an action
+  a page induces runs as the signed-in user with no per-action confirmation. The
+  defences that were already load-bearing become more so: results are selected by
+  position and never by text, page content is quoted as untrusted, and an
+  anti-bot challenge stops the session. Taken knowingly by the person whose
+  accounts are at stake, after the trade-off was put in writing.
+- **All browser work now runs on one owned thread.** Playwright's synchronous API
+  is bound to the thread that created it, and the tool executor has four workers
+  and abandons the thread — not the work — when a tool times out. Every recorded
+  session ended with `greenlet.error: Cannot switch to a different thread` raised
+  from the GUI thread during teardown, which means the browser was *not* being
+  closed and the debugging port was left open. Teardown is a security control
+  under ADR-0031, so a teardown that always raised was the control not running.
 - **A browser could be left listening on a debugging port with Jarvis gone.**
   When a tool exceeds its timeout the invoker abandons the *future*, not the
   thread; an attach that completed afterwards was stored in a workspace that had

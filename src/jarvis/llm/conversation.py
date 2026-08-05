@@ -120,11 +120,31 @@ class ConversationEngine:
         return reason() if callable(reason) else None
 
     # -- one turn ----------------------------------------------------------
+    def new_task_id(self) -> str:
+        """An identity for one spoken or typed request.
+
+        "Allow for this task" was offered by the approval dialog and then thrown
+        away by the engine — `scope 'task' requires a task_id`, four times in
+        seven minutes on 2026-08-05 — because `task_id` was only ever set by the
+        scheduler. A conversation turn had none, so every approval the owner
+        gave was silently downgraded to single use and they were asked again on
+        the next sentence.
+
+        A spoken request that needs three tools is a task in every sense that
+        matters to the person approving it, so it gets an id. Per *turn*, not
+        per conversation: "for this task" must not quietly become "for as long
+        as we keep talking", which is the same defect pointing the other way.
+        """
+        from jarvis.common import new_id
+
+        return f"turn:{new_id()}"
+
     def ask(self, conversation: Conversation, user_text: str) -> Turn:
         turn = Turn(user_text=user_text)
         if not user_text.strip():
             turn.error = "there was nothing to answer"
             return turn
+        task_id = self.new_task_id()
 
         reason = self.unavailable_reason()
         if reason is not None:
@@ -157,7 +177,7 @@ class ConversationEngine:
                 ChatMessage(role=ChatRole.ASSISTANT, content=response.text or "")
             )
             for proposal in response.tool_calls:
-                result, note = self._run_proposal(proposal, conversation)
+                result, note = self._run_proposal(proposal, conversation, task_id)
                 if result is None:
                     refused.append(note)
                     messages.append(
@@ -218,7 +238,10 @@ class ConversationEngine:
 
     # -- proposals ---------------------------------------------------------
     def _run_proposal(
-        self, proposal: ToolCallProposal, conversation: Conversation
+        self,
+        proposal: ToolCallProposal,
+        conversation: Conversation,
+        task_id: str | None = None,
     ) -> tuple[Any | None, str]:
         """Send one proposal through the invoker. Never around it."""
         if self._registry is not None and self._registry.get(proposal.tool_id) is None:
@@ -233,6 +256,11 @@ class ConversationEngine:
                 parameters=proposal.parameters,
                 conversation_id=conversation.conversation_id,
                 session_id=self._session_id,
+                # Every tool call in one turn shares this, so approving "for
+                # this task" covers the rest of what that request needs —
+                # opening the browser, restarting it, then searching — instead
+                # of asking again for each.
+                task_id=task_id,
                 initiating_utterance=None,
                 origin="planner",
             )

@@ -49,7 +49,13 @@ __all__ = ["PermissionEngine", "DefaultPolicy"]
 class DefaultPolicy:
     """Fallback decisions when no grant matches. High risk is fixed at ASK."""
 
-    __slots__ = ("low", "medium", "allow_always_for_low_risk", "session_grant_ttl_seconds")
+    __slots__ = (
+        "low",
+        "medium",
+        "allow_always_for_low_risk",
+        "session_grant_ttl_seconds",
+        "always_allowable_capabilities",
+    )
 
     def __init__(
         self,
@@ -58,6 +64,7 @@ class DefaultPolicy:
         *,
         allow_always_for_low_risk: bool = True,
         session_grant_ttl_seconds: int = 3600,
+        always_allowable_capabilities: tuple[str, ...] = (),
     ) -> None:
         if medium is Decision.ALLOW:
             # PRD 11.1: medium risk is "ask every time, per task, per app or per
@@ -67,6 +74,13 @@ class DefaultPolicy:
         self.medium = medium
         self.allow_always_for_low_risk = allow_always_for_low_risk
         self.session_grant_ttl_seconds = session_grant_ttl_seconds
+        #: Medium-risk capabilities the owner has decided may hold a standing
+        #: "always" grant (ADR-0032). Named individually and empty by default,
+        #: so a fresh install keeps PRD 11.1's posture exactly and turning one on
+        #: is a visible, revertible line of configuration rather than a
+        #: reclassification of the whole risk band. High risk is never eligible,
+        #: whatever this contains — that check runs first and does not consult it.
+        self.always_allowable_capabilities = tuple(always_allowable_capabilities)
 
 
 def _canonical_folder(value: str) -> str:
@@ -344,12 +358,15 @@ class PermissionEngine:
             )
 
         if scope is GrantScope.ALWAYS:
-            if capability.risk is not RiskLevel.LOW:
+            named = capability.capability_id in self._policy.always_allowable_capabilities
+            if capability.risk is not RiskLevel.LOW and not named:
                 raise PermissionError(
-                    f"'always' allow is only available for low-risk capabilities; "
+                    f"'always' allow is only available for low-risk capabilities, "
+                    f"and for medium-risk ones the owner has named in "
+                    f"permissions.always_allowable_capabilities; "
                     f"'{capability.capability_id}' is {capability.risk.value} risk"
                 )
-            if not self._policy.allow_always_for_low_risk:
+            if capability.risk is RiskLevel.LOW and not self._policy.allow_always_for_low_risk:
                 raise PermissionError("'always' allow is disabled by policy")
 
         if scope in (GrantScope.APPLICATION, GrantScope.FOLDER) and not scope_ref:

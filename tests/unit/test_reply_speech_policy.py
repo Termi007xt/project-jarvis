@@ -60,6 +60,44 @@ def test_instructions_are_not_narrated(request_text: str) -> None:
     assert _decide(request=request_text) is ReplyVoice.CUE
 
 
+def test_a_chatty_offer_after_a_command_does_not_earn_a_sentence() -> None:
+    """Reported 2026-08-05, and the reason the policy was not enough.
+
+    The command worked. The model then wrote *"opened it. In the meantime,
+    wanna do anything else? Maybe check system status or just open Brave
+    directly?"* — and the question mark alone turned a self-evidencing action
+    into four seconds of narration:
+
+        "opened ? good, dont need to tell me my options, i can see them ...
+         commands dont need voice. a 'Done, Sir' at max."
+
+    The follow-up-question rule exists for a real clarification, which is a
+    turn where Jarvis *cannot continue* without an answer. A command that has
+    already succeeded is not that turn, so the model's conversational garnish
+    must not be able to override the user's own intent. Whether the model felt
+    chatty is not a fact about what the user asked for.
+    """
+    assert (
+        _decide(
+            request="open youtube and search for best gaming monitors",
+            reply="Opened it. Want me to check system status, or open Brave directly?",
+        )
+        is ReplyVoice.CUE
+    )
+
+
+def test_a_clarification_with_no_action_taken_is_still_spoken() -> None:
+    """The other side of it: nothing ran, so the question is the whole turn."""
+    assert (
+        _decide(
+            request="open that thing",
+            reply="Which application did you mean?",
+            tool_results=(),
+        )
+        is ReplyVoice.SPEAK
+    )
+
+
 # -- questions are answered aloud ------------------------------------------
 @pytest.mark.parametrize(
     "request_text",
@@ -100,9 +138,25 @@ def test_a_failed_tool_is_always_spoken() -> None:
 
 
 def test_a_follow_up_question_is_always_spoken() -> None:
-    """Otherwise Jarvis waits silently for an answer nobody knows it wants."""
+    """Otherwise Jarvis waits silently for an answer nobody knows it wants.
+
+    Narrowed deliberately on 2026-08-05, to a turn where Jarvis is actually
+    blocked. This previously paired a *succeeded* `app.open` with "which profile
+    did you mean?", which cannot both be true: if Brave opened, there is nothing
+    left to clarify. That incoherent fixture was what let a question mark
+    anywhere in a reply override the whole instruction rule, and the model puts
+    one at the end of nearly every finished action.
+
+    The owner's instruction is the tie-breaker, and it covers the case where a
+    tool did succeed and Jarvis still offers a choice:
+
+        "opened ? good, dont need to tell me my options, i can see them. if i
+         ask to play one and it does, still no need to talk."
+
+    So a question only earns speech when nothing ran to answer it with.
+    """
     assert (
-        _decide(reply="Which of the two Brave profiles did you mean?")
+        _decide(reply="Which of the two Brave profiles did you mean?", tool_results=())
         is ReplyVoice.SPEAK
     )
 

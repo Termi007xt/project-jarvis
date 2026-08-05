@@ -27,7 +27,10 @@ __all__ = [
     "GroundedClaim",
     "GroundingReview",
     "review_response",
+    "claims_completion",
+    "claims_in_progress",
     "SUCCESS_PHRASES",
+    "IN_PROGRESS_PHRASES",
 ]
 
 
@@ -67,6 +70,41 @@ SUCCESS_PHRASES: tuple[str, ...] = (
 
 _SUCCESS_PATTERN = re.compile("|".join(SUCCESS_PHRASES), re.IGNORECASE | re.MULTILINE)
 
+#: Verbs Jarvis might narrate itself performing. A closed list, because the
+#: point is to catch a specific dishonest shape, not to police prose.
+_ACTION_VERBS = (
+    "search|open|play|launch|start|close|download|send|creat|delet|sav|"
+    "look|check|run|navigat|type|click"
+)
+
+#: Phrases that assert an action is **under way**, as opposed to finished.
+#:
+#: Jarvis never has anything under way at the moment it speaks. `ConversationEngine.ask`
+#: runs every tool to completion and only then produces a reply, so by the time
+#: a sentence reaches the user every action it could describe has already
+#: finished or never started. That makes the present progressive false in both
+#: directions, which is why these need no notion of what actually ran.
+#:
+#: Both real examples are from 2026-08-05: *"Now searching for 'best monitors'"*
+#: — said while `app.open` sat there genuinely verified and no search tool had
+#: been called at all — and *"Searching YouTube for latest anime now, Sir..."*,
+#: said with no tool call behind it whatsoever.
+IN_PROGRESS_PHRASES: tuple[str, ...] = (
+    # First person: "I'm searching", "I am now opening". Unambiguous without
+    # any other marker, because only Jarvis is the subject.
+    rf"\bi(?:'m| am)\s+(?:just\s+|now\s+)?(?:{_ACTION_VERBS})\w*ing\b",
+    # Sentence-initial gerund, but only with "now": "Now searching for X",
+    # "Opening a session now". The marker is what separates a narrated action
+    # from a gerund used as a subject — "Searching YouTube requires the browser
+    # to be open" is a statement of fact and must not be hedged.
+    rf"(?:^|[.!?]\s+|\n)\s*(?:now\s+)?(?:{_ACTION_VERBS})\w*ing\b[^.!?\n]*\bnow\b",
+    rf"(?:^|[.!?]\s+|\n)\s*now\s+(?:{_ACTION_VERBS})\w*ing\b",
+)
+
+_IN_PROGRESS_PATTERN = re.compile(
+    "|".join(IN_PROGRESS_PHRASES), re.IGNORECASE | re.MULTILINE
+)
+
 
 @dataclass(frozen=True)
 class GroundedClaim:
@@ -100,8 +138,24 @@ class GroundingReview:
 
 
 def claims_completion(text: str) -> bool:
-    """Whether a reply asserts that something was done."""
-    return bool(_SUCCESS_PATTERN.search(text or ""))
+    """Whether a reply asserts that something was done, or is being done."""
+    return bool(_SUCCESS_PATTERN.search(text or "")) or claims_in_progress(text)
+
+
+def claims_in_progress(text: str) -> bool:
+    """Whether a reply asserts an action is under way right now.
+
+    Questions are excluded sentence by sentence. *"Would you like me to start
+    searching now?"* offers to act and must stay an offer; hedging Jarvis's
+    questions would make it unusable to talk to, and offering is the one thing
+    it is supposed to do before acting.
+    """
+    for sentence in re.split(r"(?<=[.!?\n])\s+", text or ""):
+        if sentence.rstrip().endswith("?"):
+            continue
+        if _IN_PROGRESS_PATTERN.search(sentence):
+            return True
+    return False
 
 
 def _verification_of(result: object) -> str:
@@ -151,6 +205,27 @@ def review_response(
     else:
         label = SourceLabel.MODEL_ANSWER
 
+    # Checked before the verified/unverified question, because no tool result
+    # can support it either way. A completed tool call is evidence about the
+    # past; "I am now searching" is a claim about the present, and Jarvis has
+    # nothing in flight at the moment it speaks. On 2026-08-05 this reached the
+    # owner as "Now searching for 'best monitors'" beside a genuinely verified
+    # `app.open`, labelled "confirmed by a tool" — so asking whether any tool
+    # verified anything could never have caught it.
+    if claims_in_progress(text):
+        return GroundingReview(
+            text=_hedge_in_progress(text),
+            label=label,
+            claims_success=True,
+            verified_by_tool=False,
+            amended=True,
+            note=(
+                "the reply described an action as under way. Nothing is ever in "
+                "flight when Jarvis speaks — a turn finishes its tools first — so "
+                "this was rewritten to say what actually ran (PRD FR-047, FR-048)."
+            ),
+        )
+
     asserts_success = claims_completion(text)
     if asserts_success and not verified:
         amended = _hedge(text, ran_a_tool)
@@ -172,6 +247,20 @@ def review_response(
         claims_success=asserts_success,
         verified_by_tool=verified,
         amended=False,
+    )
+
+
+def _hedge_in_progress(text: str) -> str:
+    """Say plainly that nothing is happening, and keep the words that claimed it.
+
+    The original is kept rather than discarded, for the same reason the untrusted
+    boundary leaves a breakout attempt visible: the wording is the evidence of
+    what went wrong, and hiding it would make the next occurrence harder to see.
+    """
+    return (
+        "That is not under way — I finish everything before I answer, so nothing "
+        "is running in the background. Here is what I was going to say, which "
+        f"describes something that had not started: {text.strip()}"
     )
 
 

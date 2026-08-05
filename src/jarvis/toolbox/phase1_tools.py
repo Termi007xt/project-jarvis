@@ -114,11 +114,17 @@ class OpenApplicationTool:
         self.spec = type(self).spec.model_copy(
             update={
                 "description": (
-                    "Open an application the user has already approved. Approved "
-                    f"entries: {entries or 'none'}. Prefer this over any web tool "
-                    "when the user names one of these, even where the application "
+                    "Open an application the user has already approved, and "
+                    "nothing more — it cannot search, type or choose anything "
+                    f"inside what it opens. Approved entries: {entries or 'none'}. "
+                    "Prefer this over any web tool when the user names one of "
+                    "these and only wants it opened, even where the application "
                     "also has a website — opening the site gives them a browser "
-                    "tab, not the application they asked for."
+                    "tab, not the application they asked for. But when the "
+                    "request also says what to do once it is open, such as "
+                    "searching for something, use the tool that does that whole "
+                    "job instead: it opens what it needs by itself, and opening "
+                    "the application first can stop it from working."
                 )
             }
         )

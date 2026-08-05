@@ -84,6 +84,10 @@ _ALL: tuple[Capability, ...] = (
     _c("browser.automate_logged_in", "Browser automation in a logged-in session", _MEDIUM,
        "Drive the dedicated browser profile, which may hold live logins.", 2,
        reversible=False, scope_kind="url_host"),
+    _c("browser.restart", "Close and reopen the browser", _MEDIUM,
+       "Close the browser and start it again so it can be automated. Open tabs "
+       "are restored, because the browser is asked to close rather than killed.",
+       2, scope_kind="application"),
     _c("app.monitor", "Monitor an application", _MEDIUM,
        "Observe a named application's visible state.", 4, scope_kind="application"),
     _c("messages.copy_private", "Copy private messages", _MEDIUM,

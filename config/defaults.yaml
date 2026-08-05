@@ -154,6 +154,19 @@ permissions:
     high: ask
   session_grant_ttl_seconds: 3600
   allow_always_for_low_risk: true
+  # Medium-risk capabilities the owner has decided may be granted "always"
+  # (ADR-0032). Listing one here does not grant anything: it makes "Allow
+  # always" appear in the approval dialog, so the owner still chooses it once,
+  # it is recorded as an ordinary grant, and it can be revoked on the
+  # Permissions screen. Remove the line and the capability goes back to asking.
+  #
+  # Browser automation is here because the alternative measured worse: on
+  # 2026-08-05 it asked four times in seven minutes for the same browser, and
+  # a permission prompt that appears every sentence is one nobody reads.
+  # High-risk capabilities can never be listed here — the engine refuses them
+  # before it consults this at all.
+  always_allowable_capabilities:
+    - browser.automate_logged_in
 
 tasks:
   max_concurrent: 2

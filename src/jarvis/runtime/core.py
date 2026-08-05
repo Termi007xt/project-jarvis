@@ -205,6 +205,9 @@ class JarvisCore:
                 medium=Decision(self.config.permissions.default_policy.medium),
                 allow_always_for_low_risk=self.config.permissions.allow_always_for_low_risk,
                 session_grant_ttl_seconds=self.config.permissions.session_grant_ttl_seconds,
+                always_allowable_capabilities=(
+                    self.config.permissions.always_allowable_capabilities
+                ),
             ),
         )
         self.registry = ToolRegistry(self.audit, self.events)
@@ -503,7 +506,11 @@ class JarvisCore:
         # port. Closing it is a security control, not tidiness (ADR-0031).
         workspace = getattr(self, "browser_workspace", None)
         if workspace is not None:
-            workspace.close()
+            # `shutdown`, not `close`: the workspace owns a thread, and the
+            # close has to run on it. Closing from here directly is what raised
+            # `greenlet.error: Cannot switch to a different thread` at the end
+            # of every session in the log, leaving the port open.
+            workspace.shutdown()
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)

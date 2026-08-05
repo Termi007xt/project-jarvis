@@ -231,6 +231,12 @@ class PermissionsConfig(_Base):
     default_policy: DefaultPermissionPolicy = DefaultPermissionPolicy()
     session_grant_ttl_seconds: Annotated[int, Field(ge=0)] = 3600
     allow_always_for_low_risk: bool = True
+    #: Medium-risk capabilities that may hold a standing "always" grant, named
+    #: one at a time (ADR-0032). Empty here so the code default is PRD 11.1's
+    #: posture exactly; `config/defaults.yaml` carries this machine's owner
+    #: decision, which keeps it visible in a file they can edit or empty.
+    #: High-risk capabilities are never eligible, whatever this lists.
+    always_allowable_capabilities: tuple[str, ...] = ()
 
 
 class TasksConfig(_Base):

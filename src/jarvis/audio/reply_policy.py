@@ -104,12 +104,20 @@ def should_speak(
 
     if any(not getattr(result, "succeeded", False) for result in tool_results):
         return ReplyVoice.SPEAK
-    # A reply that asks something is waiting for an answer. Saying it silently
-    # means waiting for one nobody knows is wanted.
-    if "?" in reply:
-        return ReplyVoice.SPEAK
     if _asks_something(request):
         return ReplyVoice.SPEAK
+    # An instruction whose tools all succeeded, checked *before* the reply is
+    # read for questions. The model is fond of closing a finished action with an
+    # offer — "opened it. Want me to check system status, or open Brave
+    # directly?" — and a question mark used to be enough to turn a
+    # self-evidencing action into four seconds of narration about a window
+    # already on the screen. Whether the model felt conversational is not a fact
+    # about what the user asked for, so it does not get to overrule it.
     if tool_results:
         return ReplyVoice.CUE
+    # Nothing ran, so a reply that asks something is the whole turn: Jarvis
+    # cannot continue without an answer, and waiting silently means waiting for
+    # one nobody knows is wanted.
+    if "?" in reply:
+        return ReplyVoice.SPEAK
     return ReplyVoice.SPEAK

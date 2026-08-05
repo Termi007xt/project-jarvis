@@ -258,6 +258,13 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # defence written into a signature rather than into a rule.
         "youtube.search",
         "youtube.play",
+        # Added 2026-08-05 (ADR-0032). Brave cannot be given an automation port
+        # while it is running, so a browser Jarvis had opened itself made its
+        # own next step impossible — and the only way out was the owner quitting
+        # Brave by hand, which they did three times in four minutes. Its own
+        # tool and its own capability rather than folded into `youtube.search`:
+        # approving a search is not approving the loss of someone's windows.
+        "browser.restart",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"

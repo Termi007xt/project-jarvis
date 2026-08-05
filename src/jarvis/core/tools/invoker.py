@@ -237,9 +237,11 @@ class ToolInvoker:
         # The offered-scope table is ADR-0027's, and high risk offering only
         # single use is PRD 9.9 and 11.1, not a UX preference.
         capability = self._permissions.capability(capability_id)
+        policy = self._permissions.policy
         offerable = offerable_scopes_for(
             risk,
-            allow_always_for_low_risk=self._permissions.policy.allow_always_for_low_risk,
+            allow_always_for_low_risk=policy.allow_always_for_low_risk,
+            always_allowable=capability_id in policy.always_allowable_capabilities,
         )
         return ApprovalRequest(
             capability_id=capability_id,
