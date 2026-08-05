@@ -29,6 +29,7 @@ import os
 import secrets
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Protocol
 
 from jarvis.core.observations import ContentClass, ObservedItem, ObservedList
@@ -90,6 +91,60 @@ _SHELL_WINDOWS: frozenset[tuple[str, str]] = frozenset(
 def is_shell_window(title: str, process_name: str) -> bool:
     """Whether this is the desktop itself rather than something on it."""
     return (title.strip().casefold(), process_name.strip().casefold()) in _SHELL_WINDOWS
+
+
+#: Executables that host somebody else's application. For these the process
+#: name identifies the container and says nothing about what is running in it,
+#: so the window's own title is the only thing that names it.
+_GENERIC_HOSTS: frozenset[str] = frozenset(
+    {
+        "applicationframehost.exe",
+        "python.exe",
+        "pythonw.exe",
+        "javaw.exe",
+        "java.exe",
+        "electron.exe",
+        "runtimebroker.exe",
+    }
+)
+
+#: Where the executable name is simply not what anybody calls the application.
+_APPLICATION_NAMES: dict[str, str] = {
+    "explorer.exe": "File Explorer",
+}
+
+
+def friendly_application_name(process_name: str, title: str) -> str:
+    """What to call this application when speaking to the owner.
+
+    Reported 2026-08-05: the listing read out `WhatsApp.Root.exe`,
+    `ApplicationFrameHost.exe` and every window's full title, where *"just
+    application names are good"*.
+
+    The process name stays the thing to match on — it comes from the OS and a
+    window cannot change it — and this is only what to *say*. For most
+    applications the executable is a good name once the extension and any
+    packaging suffix are gone. For a generic host it is meaningless, and the
+    title is the only thing identifying what is running there; the first clause
+    of it, because titles carry documents and status after the name.
+    """
+    executable = Path(process_name.strip()).name
+    known = _APPLICATION_NAMES.get(executable.casefold())
+    if known:
+        return known
+
+    stem = executable[:-4] if executable.casefold().endswith(".exe") else executable
+
+    if executable.casefold() in _GENERIC_HOSTS:
+        # A redacted title must not be announced as though it were a name, so a
+        # host whose title has been withheld falls back to the host itself.
+        if title.strip() and title != SENSITIVE_TITLE_REDACTION:
+            first = title.split(" - ")[0].split(" (")[0].split(" — ")[0]
+            return first.strip() or stem
+        return stem
+
+    # `WhatsApp.Root` -> `WhatsApp`. A packaging suffix is not part of the name.
+    return stem.split(".")[0] or stem
 
 
 def is_user_facing(

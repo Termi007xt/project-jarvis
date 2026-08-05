@@ -238,6 +238,55 @@ def test_the_listing_is_filtered_to_windows_a_person_would_recognise() -> None:
                               owned=False, bounds=(-80, -80, 0, 0))
 
 
+def test_a_window_is_described_by_an_application_name_a_person_would_use() -> None:
+    """Reported 2026-08-05: the listing read out executables and full titles.
+
+        "it doesnt have to list all ids, read the extensions etc. just
+         application names are good."
+
+    Expected: "Project Jarvis, Notepad, Antigravity, WhatsApp, Settings, File
+    Explorer". Delivered: `WhatsApp.Root.exe`, `ApplicationFrameHost.exe`,
+    `explorer.exe` and the whole title of each window.
+
+    The process name is the right thing to *match* on and the wrong thing to
+    *say*. For most applications the executable is a fine name once the
+    extension and any packaging suffix are gone; for a generic host it is
+    meaningless, and the window's own title is the only thing that identifies
+    what is actually running there.
+    """
+    from jarvis.toolbox.windows import friendly_application_name
+
+    cases = [
+        # Ordinary applications: the executable, tidied.
+        ("Notepad.exe", "Untitled", "Notepad"),
+        ("Antigravity IDE.exe", "project-jarvis - Antigravity IDE", "Antigravity IDE"),
+        # A packaging suffix is not part of the name.
+        ("WhatsApp.Root.exe", "WhatsApp", "WhatsApp"),
+        # Generic hosts: the executable says nothing, so the title identifies it.
+        ("ApplicationFrameHost.exe", "Settings", "Settings"),
+        ("python.exe", "Project Jarvis (internal codename Jarvis)", "Project Jarvis"),
+        # The shell, which is neither of those.
+        ("explorer.exe", "Home", "File Explorer"),
+    ]
+    for process_name, title, expected in cases:
+        assert friendly_application_name(process_name, title) == expected, (
+            f"{process_name} with title {title!r}"
+        )
+
+
+def test_a_sensitive_window_gets_no_name_from_its_withheld_title() -> None:
+    """A generic host on the blocklist must not leak through the friendly name.
+
+    The title is already redacted by the time this runs, so the fallback would
+    otherwise announce the redaction marker as if it were an application.
+    """
+    from jarvis.toolbox.windows import SENSITIVE_TITLE_REDACTION, friendly_application_name
+
+    name = friendly_application_name("ApplicationFrameHost.exe", SENSITIVE_TITLE_REDACTION)
+    assert SENSITIVE_TITLE_REDACTION not in name
+    assert name == "ApplicationFrameHost"
+
+
 def test_the_shell_desktop_is_not_a_window() -> None:
     """explorer.exe's "Program Manager" is the desktop itself."""
     from jarvis.toolbox.windows import is_shell_window

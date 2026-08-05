@@ -44,7 +44,14 @@ _LOG = logging.getLogger(__name__)
 #: How many times one user turn may bounce between model and tools before the
 #: engine stops. PRD FR-123 requires bounded plans; an unbounded loop here would
 #: be the same failure wearing a different hat.
-MAX_TOOL_ROUNDS = 4
+#:
+#: Raised from 4 on 2026-08-05. FR-123 requires a bound, not a tight one, and
+#: four was tight enough that ordinary requests hit it: "put my IDE on the left
+#: and Settings on the right" needs a listing, two arranges and a round in which
+#: the model finally answers, which only fits if it batches both arranges into
+#: one round — and it does not reliably. A single-window arrange hit the limit
+#: in real use and was reported as a failure after it had already worked.
+MAX_TOOL_ROUNDS = 8
 
 BASE_SYSTEM_PROMPT = """\
 You are Jarvis, a local-first assistant running on the user's own Windows computer.
@@ -202,10 +209,18 @@ class ConversationEngine:
                 )
         else:
             # The loop finished without breaking: the model kept proposing.
-            turn.error = (
-                f"stopped after {self._max_tool_rounds} rounds of tool calls without "
-                "reaching an answer. Nothing further was run (PRD FR-123)."
-            )
+            #
+            # Reported 2026-08-05: "move WhatsApp to the left half" hit this,
+            # and the window really did move. Saying only that the round limit
+            # was reached read as a failure of the action, which is the opposite
+            # of what happened — and a turn that performs a state change and
+            # then reports failure spends its credibility in both directions at
+            # once, because the next report of a real failure is the one that
+            # will not be checked.
+            #
+            # The bound itself is right and stays. What has to change is that a
+            # completed effect is named whatever else went wrong.
+            turn.error = _exhaustion_message(self._max_tool_rounds, results)
 
         turn.proposals = tuple(proposals)
         turn.tool_results = tuple(results)
@@ -338,6 +353,41 @@ def _describe_silence(results: tuple[Any, ...]) -> str:
         "The model returned an empty reply. Nothing was done and I have nothing "
         "to report — please ask again, or rephrase it."
     )
+
+
+def _exhaustion_message(max_rounds: int, results: list[Any]) -> str:
+    """What to say when the round limit is reached (PRD FR-123).
+
+    The limit is a real stop and is reported as one. But the actions that
+    already ran are facts, and the ones that *changed something* are the facts
+    the user most needs, because those are the ones they would otherwise have to
+    discover by looking.
+
+    Only successful results are named. A failed one has already been reported
+    through its own result, and repeating it here would read as a second
+    failure.
+    """
+    # De-duplicated, keeping order. A model retrying the same call is *why* the
+    # limit was reached, so listing its result once per attempt is the common
+    # case — and eight identical lines is not eight facts, it is one fact with
+    # the useful part buried.
+    done: list[str] = []
+    for result in results:
+        if not getattr(result, "succeeded", False):
+            continue
+        line = (
+            f"{getattr(result, 'tool_id', 'a tool')}: "
+            f"{getattr(result, 'message', '')}"
+        ).strip(": ")
+        if line not in done:
+            done.append(line)
+    stopped = (
+        f"I stopped after {max_rounds} rounds of tool calls without reaching a "
+        "final answer, so nothing further was run (PRD FR-123)."
+    )
+    if not done:
+        return f"Nothing was completed. {stopped}"
+    return f"What did happen — {' | '.join(done)}. {stopped}"
 
 
 def _describe_result(result: Any) -> str:

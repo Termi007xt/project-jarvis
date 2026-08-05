@@ -722,6 +722,58 @@ incomplete and defeatable. Measured on your desktop afterwards: **11 → 3**
 list. Filtering too hard is the failure mode this fix could have introduced, and
 it would look like the window simply not being there.
 
+## 4.7 — Two more from your second round (2026-08-05)
+
+### It succeeded and told you it failed
+
+> Sir: move WhatsApp to the left half of the screen.
+> Jarvis could not answer: stopped after 4 rounds of tool calls without
+> reaching an answer. Nothing further was run.
+>
+> *"it actually worked, but it reported and narrated fail."*
+
+The round limit is real and stays — PRD FR-123 requires a bound, and an
+unbounded loop between a model and a set of effects is exactly what it exists to
+prevent. What was wrong was the report: `window.arrange` had run and succeeded,
+and "nothing further was run" reads as the *action* having failed.
+
+That matters more than wording. The whole phase rests on being believed both
+when Jarvis says something worked and when it says something did not, and a turn
+that performs a change and then reports failure spends that credit in both
+directions — this time you checked and found it done; next time you might not
+check the one that really did fail.
+
+**Now:** the report names what completed first, then says it stopped.
+Identical repeats are collapsed, since a model retrying the same call is usually
+*why* the limit was hit.
+
+**Also raised the limit from 4 to 8.** Four was tight enough that ordinary
+requests hit it: "put my IDE on the left and Settings on the right" needs a
+listing, two arranges and a round to answer in.
+
+**Tell me:** if you still see the round-limit message on an ordinary request.
+
+### The listing was too chatty
+
+> *"it doesnt have to list all ids, read the extensions etc. just application
+> names are good."*
+
+**Now** each window carries a plain application name, and the tool tells the
+model to use it and not to read out titles, paths or references unless asked.
+Measured on your desktop:
+
+```
+Antigravity IDE, Project Jarvis, WhatsApp, Notepad, Settings, File Explorer
+```
+
+`WhatsApp.Root.exe` → WhatsApp, `explorer.exe` → File Explorer, and
+`ApplicationFrameHost.exe`/`python.exe` are generic hosts whose executable says
+nothing, so the window's own title names them.
+
+**Tell me:** if any application comes out with a silly name. The rule is a
+heuristic over executable names; reading the real name out of the file's version
+resource would be more correct and is worth doing if this is visibly wrong.
+
 ## 4.5 — Optional: run the live window lab yourself
 
 ```powershell
@@ -739,7 +791,7 @@ created. Your own windows are read, never touched.
 python -m pytest
 ```
 
-**You should see:** `1229 passed, 2 skipped`.
+**You should see:** `1235 passed, 2 skipped`.
 
 ## Still to come in stage 4
 

@@ -61,6 +61,20 @@ has shipped yet.
 
 ### Fixed
 
+- **A turn that ran out of steps reported failure for actions that had already
+  succeeded.** "Move WhatsApp to the left half" moved the window and then said
+  *"stopped after 4 rounds of tool calls… nothing further was run"*, which reads
+  as the action having failed. The bound stays — PRD FR-123 requires one — but
+  the report now names what completed before saying it stopped, and collapses
+  identical repeats, since a model retrying the same call is usually why the
+  limit was reached. The limit itself is raised from 4 to 8: arranging two
+  windows needs a listing, two arranges and a round to answer in, and four left
+  no room for that.
+- **Window listings read out executable names and full titles.** Each window now
+  carries a plain application name — "WhatsApp" rather than `WhatsApp.Root.exe`,
+  "File Explorer" rather than `explorer.exe` — and applications that merely host
+  something else are named by their window instead. The executable is still what
+  matching keys on; it is no longer what gets said.
 - **Jarvis narrated commands that had already worked.** A finished action is
   self-evidencing, and the reply policy said so — but it read the reply for a
   question mark *before* applying that rule, and the model ends nearly every
