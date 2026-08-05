@@ -395,9 +395,9 @@
     "semantic_hash": "575543b1ba9745b883bbb4aaf7004d2b"
   },
   "CHANGELOG.md": {
-    "mtime": 1785825134.1664648,
-    "ast_hash": "fceab6efdf12fd7509dbbdd18fdcbcf9",
-    "semantic_hash": ""
+    "mtime": 1785929192.719103,
+    "ast_hash": "01a19ac6310915a8bd4ba5f0a32a6d3c",
+    "semantic_hash": "01a19ac6310915a8bd4ba5f0a32a6d3c"
   },
   "DATA_MODEL.md": {
     "mtime": 1785825134.166964,
@@ -430,9 +430,9 @@
     "semantic_hash": "1fac1bcdd8a03dcbaf3a2267fd0233b5"
   },
   "config/defaults.yaml": {
-    "mtime": 1785825134.1679654,
-    "ast_hash": "ad02650d414895ef2f11b064c52db0ae",
-    "semantic_hash": ""
+    "mtime": 1785915580.7057805,
+    "ast_hash": "ac67130c519ef6c9e87bf8b281a6c78b",
+    "semantic_hash": "ac67130c519ef6c9e87bf8b281a6c78b"
   },
   "docs/BACKLOG.md": {
     "mtime": 1785830370.0720682,
@@ -835,9 +835,9 @@
     "semantic_hash": "af655eddbca7d5f2221ec00e6ebb452a"
   },
   "src/jarvis/audio/reply_policy.py": {
-    "mtime": 1785825134.190478,
-    "ast_hash": "f6b9649b1b9af9e481a2380d8701af03",
-    "semantic_hash": "f6b9649b1b9af9e481a2380d8701af03"
+    "mtime": 1785928878.4973202,
+    "ast_hash": "8a93ebe1327a6ca08c8d7cf7eabe35c5",
+    "semantic_hash": "8a93ebe1327a6ca08c8d7cf7eabe35c5"
   },
   "tests/security/test_tool_specs_are_valid.py": {
     "mtime": 1785840998.681316,
@@ -880,9 +880,9 @@
     "semantic_hash": "d174a1c8ae210496805e1906ab057581"
   },
   "tests/unit/test_reply_speech_policy.py": {
-    "mtime": 1785825134.2179952,
-    "ast_hash": "0ad4e561edd96b62409d5a1e67bf88b0",
-    "semantic_hash": "0ad4e561edd96b62409d5a1e67bf88b0"
+    "mtime": 1785928932.149335,
+    "ast_hash": "f6a13fde15ad39c239f824120cf25651",
+    "semantic_hash": "f6a13fde15ad39c239f824120cf25651"
   },
   "tests/unit/test_speakable_text.py": {
     "mtime": 1785825134.2184951,
@@ -910,14 +910,14 @@
     "semantic_hash": "b0bb06aada563ed031679f875289cefb"
   },
   "docs/PHASE-02-ACCEPTANCE-TESTING.md": {
-    "mtime": 1785829585.3472905,
-    "ast_hash": "ee6ed29f64d928b32e03a732900e24f5",
-    "semantic_hash": ""
+    "mtime": 1785913187.503234,
+    "ast_hash": "f09405985ac88a3ad200693331322c50",
+    "semantic_hash": "f09405985ac88a3ad200693331322c50"
   },
   "docs/PROJECT_STATE.md": {
-    "mtime": 1785916622.2583883,
-    "ast_hash": "2cb3224864cbf5e6f68b581b31c24f47",
-    "semantic_hash": "2cb3224864cbf5e6f68b581b31c24f47"
+    "mtime": 1785929179.7267237,
+    "ast_hash": "ddde3cb71bec6696778a1dafa5ea6424",
+    "semantic_hash": "ddde3cb71bec6696778a1dafa5ea6424"
   },
   "docs/decisions/ADR-0027-approval-and-activation-interaction-model.md": {
     "mtime": 1785825134.1709645,
@@ -975,9 +975,9 @@
     "semantic_hash": "4c95a443d23907fdd6d9f02dfcccf0f6"
   },
   "src/jarvis/toolbox/browser.py": {
-    "mtime": 1785915377.8201954,
-    "ast_hash": "6b77b832e5da14723c2febd3832680db",
-    "semantic_hash": "6b77b832e5da14723c2febd3832680db"
+    "mtime": 1785918779.5286114,
+    "ast_hash": "27f8b43860cb367696ea6c47413566e5",
+    "semantic_hash": "27f8b43860cb367696ea6c47413566e5"
   },
   "src/jarvis/toolbox/captcha.py": {
     "mtime": 1785844351.9142725,
@@ -990,9 +990,9 @@
     "semantic_hash": "787d17dfaed85510e5ae859fb436ed9e"
   },
   "src/jarvis/toolbox/phase2_tools.py": {
-    "mtime": 1785915496.3715277,
-    "ast_hash": "f6e249e74eaa2f8112346c4f1ae9afbc",
-    "semantic_hash": "f6e249e74eaa2f8112346c4f1ae9afbc"
+    "mtime": 1785918949.6681755,
+    "ast_hash": "03a254600edf868f68088a0b97d61610",
+    "semantic_hash": "03a254600edf868f68088a0b97d61610"
   },
   "src/jarvis/toolbox/uia.py": {
     "mtime": 1785841556.6629152,
@@ -1078,5 +1078,25 @@
     "mtime": 1785916453.8601112,
     "ast_hash": "d294d9435bb03788f9cfd0e8068fa9f1",
     "semantic_hash": "d294d9435bb03788f9cfd0e8068fa9f1"
+  },
+  "tests/unit/test_browser_thread_affinity.py": {
+    "mtime": 1785918681.1201887,
+    "ast_hash": "a399a585ffbc00c5a6929d87fc50c1c2",
+    "semantic_hash": "a399a585ffbc00c5a6929d87fc50c1c2"
+  },
+  "tools/browser-lab/test_attach_side_effects.py": {
+    "mtime": 1785919562.4527886,
+    "ast_hash": "83a715f2cc2eb31b1be39c4dc464d21d",
+    "semantic_hash": "83a715f2cc2eb31b1be39c4dc464d21d"
+  },
+  "tools/browser-lab/test_exit_criterion_threaded.py": {
+    "mtime": 1785919328.448371,
+    "ast_hash": "5bcdcdb024abfeedb61e1efd3185c6fe",
+    "semantic_hash": "5bcdcdb024abfeedb61e1efd3185c6fe"
+  },
+  "tools/browser-lab/test_single_tab_cdp.py": {
+    "mtime": 1785919862.0704064,
+    "ast_hash": "10e17bbdb4ca54d31e3e3f7a76b47e80",
+    "semantic_hash": "10e17bbdb4ca54d31e3e3f7a76b47e80"
   }
 }
