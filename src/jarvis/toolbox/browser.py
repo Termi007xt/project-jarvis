@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -49,10 +50,14 @@ from jarvis.toolbox.launch import (
 __all__ = [
     "BraveCdpSession",
     "BrowserUnavailable",
+    "BrowserNeedsRestart",
     "PlaywrightPageDriver",
     "brave_user_data_dir",
+    "browser_windows",
+    "close_window",
     "existing_debug_port",
     "free_ephemeral_port",
+    "quit_browser",
     "RESULT_SELECTOR",
 ]
 
@@ -85,6 +90,181 @@ _RECALLED_PORT_TIMEOUT_SECONDS = 2.0
 
 class BrowserUnavailable(RuntimeError):
     """The browser could not be started or attached to."""
+
+
+class BrowserThreadViolation(RuntimeError):
+    """A page was driven from a thread other than the one that created it.
+
+    Playwright's synchronous API is bound to its creating thread, and the
+    failure it produces otherwise is neither legible nor local: an asyncio
+    callback raises `greenlet.error: Cannot switch to a different thread`, the
+    page ends up closed, and the traceback points at Playwright internals rather
+    than at the call that was wrong. On 2026-08-05 that surfaced to the owner as
+    a browser that opened a blank tab and never searched.
+
+    Raised eagerly and by name so the *next* caller to get this wrong is told
+    what they did, at the moment they do it.
+    """
+
+
+class BrowserNeedsRestart(BrowserUnavailable):
+    """Brave is running without an automation port, and only a restart fixes it.
+
+    Its own type because it is the one browser failure with a known, automatable
+    remedy. Collapsed into `BrowserUnavailable` it was indistinguishable from a
+    missing Playwright or a browser that will not start, and on 2026-08-05 the
+    model responded to it by inventing instructions for a human — *"I need you
+    to manually quit Brave once from your taskbar"* — about a browser Jarvis had
+    opened itself fifty-six seconds earlier.
+    """
+
+
+#: How long to wait for a browser to shut down after its windows are asked to
+#: close. Generous, because Chromium writes out session state on the way out and
+#: that is precisely what makes the tabs come back.
+QUIT_TIMEOUT_SECONDS = 15.0
+_QUIT_POLL_SECONDS = 0.25
+
+
+def browser_windows(process_names: tuple[str, ...]) -> list[int]:
+    """Top-level window handles belonging to any of the named processes.
+
+    Read-only: enumerating windows changes nothing. Windows-only, and empty
+    everywhere else, which keeps the Linux import CI enforces working.
+    """
+    if not process_names or os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    wanted_pids = _pids_for(process_names)
+    if not wanted_pids:
+        return []
+
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+    handles: list[int] = []
+
+    callback_type = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+    )
+
+    def visit(hwnd: int, _param: int) -> bool:
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        # Only visible top-level windows: Chromium keeps a swarm of hidden
+        # message-only windows, and asking those to close does nothing while
+        # making the count meaningless.
+        if pid.value in wanted_pids and user32.IsWindowVisible(hwnd):
+            handles.append(int(hwnd))
+        return True
+
+    user32.EnumWindows(callback_type(visit), 0)
+    return handles
+
+
+def _pids_for(process_names: tuple[str, ...]) -> set[int]:
+    """Process ids for the named executables, via the tool-help snapshot."""
+    if os.name != "nt":
+        return set()
+    import ctypes
+    from ctypes import wintypes
+
+    wanted = {name.casefold() for name in process_names}
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    if snapshot == ctypes.c_void_p(-1).value:
+        return set()
+    found: set[int] = set()
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return found
+        while True:
+            if entry.szExeFile.casefold() in wanted:
+                found.add(int(entry.th32ProcessID))
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                return found
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
+def close_window(handle: int) -> None:
+    """Ask a window to close, the way clicking its X does.
+
+    `WM_CLOSE` is a *request*: the application decides what to do with it, which
+    is the entire point. Chromium takes it as "quit", writes its session out and
+    restores those tabs next time. Terminating the process would skip all of
+    that and greet the user with "Brave didn't shut down correctly" — while
+    Jarvis had just promised their tabs would come back.
+    """
+    if os.name != "nt":  # pragma: no cover - Windows-only path
+        return
+    import ctypes
+
+    WM_CLOSE = 0x0010
+    ctypes.windll.user32.PostMessageW(handle, WM_CLOSE, 0, 0)  # type: ignore[attr-defined]
+
+
+#: Bound before `quit_browser` shadows the name with its parameter, so the
+#: default stays the real function rather than a `globals()` lookup.
+_CLOSE_WINDOW = close_window
+
+
+def quit_browser(
+    process_names: tuple[str, ...],
+    *,
+    timeout_seconds: float = QUIT_TIMEOUT_SECONDS,
+    windows_for: "Callable[[tuple[str, ...]], list[int]] | None" = None,
+    close_window: "Callable[[int], None] | None" = None,
+    still_running: "Callable[[tuple[str, ...]], bool] | None" = None,
+    sleep: "Callable[[float], None] | None" = None,
+) -> bool:
+    """Close the browser gracefully and confirm it actually exited.
+
+    Returns whether it is gone. Never forces the issue: a page holding an
+    "unsaved changes" prompt is the owner's to answer, and discarding their work
+    to satisfy a search would be a far worse outcome than saying so.
+
+    The seams are injected for the same reason `BraveCdpSession` injects its
+    launcher — the whole path is then testable without a real browser, and CI
+    stays able to run it on Linux.
+    """
+    find_windows = windows_for or browser_windows
+    close = close_window or _CLOSE_WINDOW
+    running = still_running or process_running
+    pause = sleep or time.sleep
+
+    if not running(process_names):
+        return True  # already closed; the owner may have got there first
+
+    handles = find_windows(process_names)
+    for handle in handles:
+        close(handle)
+    _LOG.info("asked %d browser window(s) to close", len(handles))
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not running(process_names):
+            return True
+        pause(_QUIT_POLL_SECONDS)
+
+    return not running(process_names)
 
 
 def free_ephemeral_port() -> int:
@@ -237,12 +417,12 @@ class BraveCdpSession:
                 else None
             )
             if banner is None:
-                raise BrowserUnavailable(
+                raise BrowserNeedsRestart(
                     "Brave is already open, and a browser that is already "
                     "running cannot be given an automation port — that setting "
-                    "only applies when it starts. Close Brave and ask again and "
-                    "it will reopen with your tabs restored, or let Jarvis open "
-                    "Brave in the first place and it stays available all session."
+                    "only applies when it starts. Call the 'browser.restart' "
+                    "tool to close Brave and reopen it with the tabs restored, "
+                    "then try again. Do not ask the user to close it by hand."
                 )
             # A browser we did not start. Attach to it, but never close it.
             self._port = recalled
@@ -334,12 +514,17 @@ class BraveCdpSession:
         self._port = None
 
     def page(self) -> "PlaywrightPageDriver":
-        """The session's page. The *same* one every time.
+        """The session's page. The *same* one every time — while it exists.
 
         This opened a new tab on every call until a spike called it twice and
         got two. "Play the second video" would then have run against a fresh
         blank tab rather than the results the search had just read — the two
         utterances silently talking about different pages.
+
+        Sticky is not the same as immortal, though. The driver is handed the
+        means to open a replacement tab, because the owner closing one is the
+        most ordinary thing anybody does in a browser and it must not cost them
+        the rest of the session (see `PlaywrightPageDriver._live`).
         """
         if self._browser is None:
             raise BrowserUnavailable("no browser is attached; use this as a context manager")
@@ -349,7 +534,9 @@ class BraveCdpSession:
                 if self._browser.contexts
                 else self._browser.new_context()
             )
-            self._page = PlaywrightPageDriver(context.new_page())
+            self._page = PlaywrightPageDriver(
+                context.new_page(), new_page=context.new_page
+            )
         return self._page
 
 
@@ -360,11 +547,77 @@ class PlaywrightPageDriver:
     only way to identify a result is its ordinal.
     """
 
-    def __init__(self, page: Any) -> None:
+    def __init__(self, page: Any, *, new_page: "Callable[[], Any] | None" = None) -> None:
         self._page = page
+        self._new_page = new_page
+        #: The thread Playwright bound itself to. Every later call must arrive
+        #: on it — see `_check_thread`.
+        self._owner_thread = threading.get_ident()
+        self._prepare(page)
+
+    def _check_thread(self) -> None:
+        """Refuse, legibly, rather than fail illegibly somewhere else later.
+
+        `BrowserWorkspace` owns a thread and routes work to it, and on
+        2026-08-05 it did that correctly for opening the session and then handed
+        the adapter back so the tools drove it from the invoker's worker
+        instead. Nothing objected at the call site. What objected was an asyncio
+        callback minutes later, with `greenlet.error: Cannot switch to a
+        different thread` and a closed page, and the visible result was a
+        browser that opened a blank tab and never searched.
+
+        The routing is the fix. This is what stops it being undone silently: the
+        object that is thread-bound is the one that knows, so it is the one that
+        checks.
+        """
+        current = threading.get_ident()
+        if current != self._owner_thread:
+            raise BrowserThreadViolation(
+                f"the browser was driven from thread {current}, but Playwright "
+                f"bound this page to thread {self._owner_thread}. Route the call "
+                "through BrowserWorkspace.with_adapter() so it runs on the "
+                "browser's own thread."
+            )
+
+    @staticmethod
+    def _prepare(page: Any) -> None:
+        """Undo Playwright's own emulation, so this looks like the owner's tab.
+
+        Playwright forces `prefers-color-scheme: light` on pages it creates. On
+        2026-08-05 that produced one light-mode YouTube tab among a window of
+        dark ones — small, and exactly the kind of tell that makes automation
+        feel like a foreign process rather than the owner's own session, which
+        is the opposite of what ADR-0019 chose their real profile for.
+        """
+        try:
+            page.emulate_media(color_scheme="null")
+        except Exception:  # noqa: BLE001 - cosmetic; never worth failing a search
+            _LOG.debug("could not clear the emulated colour scheme", exc_info=True)
+
+    def _live(self) -> Any:
+        """The page, replaced if the owner closed it.
+
+        Reported 2026-08-05 as *"the YouTube search failed because the browser
+        tab was unexpectedly closed"*, and recorded in the audit log as
+        `Page.goto: Target page, context or browser has been closed`. The
+        *browser* was fine — `is_alive()` said so correctly — and the single
+        cached tab was what had died, which nothing looked at.
+        """
+        self._check_thread()
+        if self._new_page is None:
+            return self._page
+        try:
+            closed = bool(self._page.is_closed())
+        except Exception:  # noqa: BLE001 - a page that cannot answer is gone
+            closed = True
+        if closed:
+            _LOG.info("the tab was closed; opening a fresh one")
+            self._page = self._new_page()
+            self._prepare(self._page)
+        return self._page
 
     def goto(self, url: str, timeout_seconds: float) -> None:
-        self._page.goto(url, timeout=timeout_seconds * 1000, wait_until="domcontentloaded")
+        self._live().goto(url, timeout=timeout_seconds * 1000, wait_until="domcontentloaded")
 
     def content(self) -> str:
         """The page's markup, for anti-bot detection only (FR-058).
@@ -373,8 +626,13 @@ class PlaywrightPageDriver:
         decide whether to *stop*, never to decide whether to proceed — see
         `jarvis.toolbox.captcha` for why that direction matters.
         """
+        # Resolved outside the `try`, so a thread violation is raised rather
+        # than swallowed into "the page was unreadable" — which is how a
+        # misrouted call would otherwise disappear into an empty string and
+        # surface much later as something unrelated.
+        page = self._live()
         try:
-            return self._page.content()
+            return page.content()
         except Exception:  # noqa: BLE001
             # An unreadable page is not a challenge; let the normal result path
             # report honestly rather than inventing a CAPTCHA.
@@ -382,8 +640,9 @@ class PlaywrightPageDriver:
             return ""
 
     def results(self, timeout_seconds: float) -> list[dict[str, str]]:
+        page = self._live()
         try:
-            self._page.wait_for_selector(RESULT_SELECTOR, timeout=timeout_seconds * 1000)
+            page.wait_for_selector(RESULT_SELECTOR, timeout=timeout_seconds * 1000)
         except Exception:  # noqa: BLE001
             # No results is a fact, not a failure. A consent interstitial or a
             # layout change also lands here, which is why the caller sees an
@@ -392,7 +651,7 @@ class PlaywrightPageDriver:
             return []
 
         found: list[dict[str, str]] = []
-        for element in self._page.query_selector_all(RESULT_SELECTOR):
+        for element in page.query_selector_all(RESULT_SELECTOR):
             link = element.query_selector("a#video-title")
             title = (link.get_attribute("title") if link else None) or ""
             href = (link.get_attribute("href") if link else None) or ""
@@ -400,7 +659,7 @@ class PlaywrightPageDriver:
         return found
 
     def click_result(self, position: int, timeout_seconds: float) -> None:
-        elements = self._page.query_selector_all(RESULT_SELECTOR)
+        elements = self._live().query_selector_all(RESULT_SELECTOR)
         if position >= len(elements):
             raise IndexError(f"position {position} is past the {len(elements)} results")
         link = elements[position].query_selector("a#video-title")
@@ -410,9 +669,10 @@ class PlaywrightPageDriver:
 
     def player_state(self, timeout_seconds: float) -> dict[str, Any] | None:
         """Read the player back. This is what turns a click into a success."""
+        page = self._live()
         try:
-            self._page.wait_for_selector("video", timeout=timeout_seconds * 1000)
-            return self._page.evaluate(
+            page.wait_for_selector("video", timeout=timeout_seconds * 1000)
+            return page.evaluate(
                 """() => {
                     const video = document.querySelector('video');
                     if (!video) return null;
