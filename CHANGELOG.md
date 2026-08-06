@@ -91,6 +91,21 @@ has shipped yet.
 
 ### Fixed
 
+- **A reply could claim an action was done on the strength of an unrelated
+  listing.** Asked to close Microsoft Edge, Jarvis called `window.list`, saw
+  Edge in the results, and answered "The MS Edge window has been closed
+  successfully" — twice, marked *confirmed by a tool*, with Edge still open and
+  no close tool ever called. The check that exists to stop exactly this asks
+  whether any tool result was verified, and is sound only because read-only
+  tools report *nothing to verify*; `window.list` declared itself read-only and
+  reported *verified*, so verifying that it had listed some windows was read as
+  licence to claim a window had been closed. A tool that changes nothing now has
+  nothing to verify, enforced where every action passes through rather than
+  tool by tool.
+- **The model could describe an action instead of performing it.** Each round of
+  tool calls now ends with a plain record of what changed, and in particular of
+  what did not: individual tool results are each accurate and none of them can
+  report an absence, which is the gap the false claim grew in.
 - **Closing an application could report success while it was still open.**
   Closing Microsoft Edge with a tab that asks before leaving said *"Microsoft
   Edge has been closed"* — verified — with Edge still on screen. The check asked

@@ -1030,13 +1030,79 @@ Nothing else should change.
 **Tell me:** if the voice stops working. That would mean a model is not where
 this expects it, and the fix is one setting: `storage.speech_models_local_only`.
 
+## 4.17 — "Why did I have to spell out the tool?" ⭐ **the one you found**
+
+Your round on 2026-08-06 evening. The audit log settles exactly what happened,
+and it is worse than it looked:
+
+| You said | What actually ran | What Jarvis said |
+|---|---|---|
+| "close my MS Edge window" | **`window.list` only** | "has been closed successfully" |
+| "MS Edge is not closed" | `window.list`, `app.close` → unverified | correctly reported the dialog ✓ |
+| "close that anime, I give you permission" | **`window.list` only** | "has been closed successfully" |
+| "it is still open, force close it" | `window.list`, `app.force_close` → verified | correct ✓ |
+
+**On turns 1 and 3, no close tool ran at all.** Jarvis listed your windows, saw
+Edge in the list, and described a close it had never performed. That is why
+there was no permission prompt — `window.list` is low risk and you had already
+granted it "always".
+
+### Why it said "confirmed by a tool"
+
+There is a layer whose entire job is to stop a reply claiming an unverified
+success. It did not fire, and the reason is exact.
+
+Its rule is that a success claim needs a `verified` tool result, and it is safe
+*because read-only tools report "nothing to verify"* — they change nothing, so
+there is nothing to confirm. That reasoning is right and its premise was false:
+`window.list` declared itself read-only and returned **verified**. So "I verified
+that I listed your windows" was read as licence for "I closed Edge".
+
+The invoker already enforced the mirror of that rule — a tool that changes
+something without confirming it is downgraded — and the missing direction is the
+one that bit you. **A tool that changes nothing has nothing to verify**, whatever
+it says about itself. Fixed at the invoker, because that is the single point
+every action passes through and a rule enforced tool-by-tool is one the next tool
+forgets.
+
+**What you should now see:** if Jarvis ever again claims something was done
+without doing it, the reply is rewritten before it reaches you — it will open by
+saying it could not confirm it, and the label will not say a tool confirmed it.
+
+### Why it needed telling twice
+
+That is the second half, and it is a different problem: the model *narrated*
+instead of acting. Every tool message it received was accurate — a listing
+reported a listing — and none of them could say the thing that mattered, because
+**absence is not something an individual result can report.**
+
+So each round now ends with a plain record: *"nothing on the computer has been
+changed; the tools that ran only read or listed things. If the user asked for an
+action, call the tool that performs it."*
+
+**Please retry the whole sequence** — ask to close Edge, once, without naming any
+tool.
+
+**Tell me:**
+- whether it calls `app.close` on the **first** ask (you should get a permission
+  prompt straight away);
+- whether it ever again says something is done when it is not — that should now
+  be structurally impossible to reach you unchallenged, and if it does, it is a
+  hole in the check rather than the model being sloppy.
+
+> **What I have not fixed:** the model choosing the right tool first time is
+> model behaviour, not a rule I can enforce. What is now enforced is that it
+> cannot *claim* to have done what it did not do. If it still needs prompting on
+> the first ask, that is a prompt-and-model problem, and worth telling me — the
+> tool descriptions are the next lever.
+
 ## 4.16 — Confirm the suite
 
 ```powershell
 python -m pytest
 ```
 
-**You should see:** `1279 passed, 2 skipped`, exit code 0.
+**You should see:** `1285 passed, 2 skipped`, exit code 0.
 
 ## Still to come
 

@@ -142,6 +142,39 @@ that change what the product can do:
 
 ## In Progress
 
+### 2026-08-06 evening — the grounding check was sound and its premise was false
+
+The owner asked Jarvis to close Microsoft Edge. The audit log is unambiguous:
+
+```
+13:58:29  window.list   succeeded verified   -- "MS Edge ... has been closed successfully"
+13:59:24  window.list   succeeded verified   -- "MS Edge ... has been closed successfully!"
+```
+
+**No close tool ran in either turn**, and both replies were labelled *confirmed
+by a tool*. Edge was open throughout. It took two corrections from the owner
+before `app.close` was called at all, and a third before `app.force_close`.
+
+`jarvis.llm.grounding` exists to stop precisely this and did not fire. Its rule
+— a success claim needs a `verified` result — is safe *because a read-only tool
+reports `not_applicable`*, having changed nothing to verify. `window.list`
+declared `changes_state=False` and returned `VERIFIED`, so the premise failed
+and "I verified that I listed your windows" licensed "I closed Edge".
+
+`ToolInvoker` already enforced the mirror rule: a state-changing tool reporting
+`not_applicable` is downgraded to `unverified`. The missing direction is now
+enforced beside it — **a tool that changes nothing has nothing to verify** —
+normalised at the invoker, because that is the single point every effect passes
+through and a per-tool rule is one the next tool forgets. A useful side effect:
+`verified` now means exactly "a state-changing tool confirmed its own effect",
+which is a signal the rest of the engine can rely on.
+
+The second half is the model narrating rather than acting, which no rule can
+forbid. Each tool round now ends with a trusted record of what changed and, more
+usefully, what did not: every individual tool message was accurate, and **none of
+them could report an absence**. Whether it now calls the right tool on the first
+ask is for the owner's next round (`docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.17).
+
 ### 2026-08-06 — stage 4: a false `verified`, and two things that were wired to nothing
 
 **The Edge close bug is the important one.** The owner closed Notepad (worked),

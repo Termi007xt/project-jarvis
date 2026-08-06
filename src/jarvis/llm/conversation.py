@@ -207,6 +207,20 @@ class ConversationEngine:
                         untrusted=True,
                     )
                 )
+
+            # What has and, more usefully, has *not* happened. Trusted: this is
+            # the engine's own record of its own invocations, not anything a
+            # tool or a window said.
+            #
+            # Reported 2026-08-06: asked to close Microsoft Edge, the model
+            # called `window.list`, saw Edge in the listing, and answered "The
+            # MS Edge window has been closed successfully." Twice. The tool
+            # messages above each described a listing accurately; what none of
+            # them could say is that *nothing had been closed*, because absence
+            # is not something an individual result can report.
+            messages.append(
+                ChatMessage(role=ChatRole.SYSTEM, content=_round_ledger(results))
+            )
         else:
             # The loop finished without breaking: the model kept proposing.
             #
@@ -352,6 +366,46 @@ def _describe_silence(results: tuple[Any, ...]) -> str:
     return (
         "The model returned an empty reply. Nothing was done and I have nothing "
         "to report — please ask again, or rephrase it."
+    )
+
+
+def _round_ledger(results: list[Any]) -> str:
+    """State plainly what has changed on the computer, and what has not.
+
+    Every individual tool message is accurate and none of them can say this. A
+    listing reports a listing; only the turn as a whole knows that nothing was
+    closed. On 2026-08-06 that gap produced *"The MS Edge window has been closed
+    successfully"* on the back of two `window.list` calls, with Edge still open.
+
+    ``verified`` is the signal, and it means exactly the right thing now that
+    the invoker normalises read-only tools to ``not_applicable``: a verified
+    result is a state-changing tool that confirmed its own effect. Nothing else
+    counts as something having been done.
+    """
+    changed = [
+        getattr(result, "tool_id", "a tool")
+        for result in results
+        if getattr(result, "succeeded", False)
+        and getattr(getattr(result, "verification", None), "value", "") == "verified"
+    ]
+    if changed:
+        # De-duplicated: the same tool twice is one kind of change, not two.
+        unique = list(dict.fromkeys(changed))
+        return (
+            "Record of this turn: these tools changed something and confirmed "
+            f"it — {', '.join(unique)}. You may say those are done. Anything "
+            "else you were asked to do has not been done yet."
+        )
+    if results:
+        return (
+            "Record of this turn: nothing on the computer has been changed. The "
+            "tools that ran only read or listed things, which is not the same as "
+            "doing them. If the user asked for an action, call the tool that "
+            "performs it — do not describe the action as done."
+        )
+    return (
+        "Record of this turn: no tool has run, so nothing has been done. Do not "
+        "describe any action as completed."
     )
 
 
