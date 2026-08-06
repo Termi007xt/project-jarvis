@@ -56,6 +56,8 @@ __all__ = [
     "WindowListTool",
     "WindowArrangeTool",
     "WindowArrangeAction",
+    "AppCloseTool",
+    "AppForceCloseTool",
     "register_window_tools",
 ]
 
@@ -345,9 +347,174 @@ class WindowArrangeTool:
         return self._controller.move_resize(parameters.window, x, top, half, height)
 
 
+# =========================================================================
+# Closing, and forcing — deliberately two tools
+# =========================================================================
+class AppCloseInput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: str = Field(
+        min_length=1,
+        max_length=64,
+        description="The 'window' reference from window.list.",
+    )
+
+
+class AppCloseOutput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: str
+    application: str
+    outcome: str
+    verified: bool
+    detail: str
+
+
+class AppCloseTool:
+    """Ask an application to close. Never forces (FR-065, FR-066, AT-004)."""
+
+    spec = ToolSpec(
+        tool_id="app.close",
+        version="1.0.0",
+        description=(
+            "Ask the application owning a window to close, exactly as clicking "
+            "its X does. It may refuse, and an application with unsaved work "
+            "will usually put a save prompt up instead — that prompt is left on "
+            "screen for the user to answer, and Jarvis stops there. This never "
+            "forces anything shut; if the user actually wants that, it is "
+            "app.force_close and they have to ask for it by name."
+        ),
+        input_model=AppCloseInput,
+        output_model=AppCloseOutput,
+        risk=RiskLevel.MEDIUM,
+        required_capabilities=("app.close",),
+        resource_locks=(FOREGROUND_DESKTOP,),
+        timeout_seconds=30.0,
+        retry_policy=RetryPolicy(max_attempts=1),
+        changes_state=True,
+        verification=(
+            "Looks for the window afterwards. Gone is closed; still there with a "
+            "new dialog from the same process is the application asking "
+            "something; still there with nothing asking is a refusal."
+        ),
+        failure_codes=(
+            "windows_unavailable",
+            "no_such_window",
+            "sensitive_window",
+            "secure_desktop",
+        ),
+        reversible=False,
+    )
+
+    def __init__(self, controller: WindowController) -> None:
+        self._controller = controller
+
+    def run(self, context: ToolContext, parameters: BaseModel) -> ToolExecution:
+        assert isinstance(parameters, AppCloseInput)
+        report = _guarded(lambda: self._controller.close(parameters.window))
+        return _close_execution(report)
+
+
+class AppForceCloseInput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: str = Field(
+        min_length=1,
+        max_length=64,
+        description="The 'window' reference from window.list.",
+    )
+
+
+class AppForceCloseTool:
+    """Terminate the process behind a window (FR-067, AT-005).
+
+    High risk, which under PRD §11.1 means fresh confirmation every single time
+    and no standing grant, ever. Its own tool rather than a flag on `app.close`,
+    because a flag is something a model can set and a separate tool is something
+    a user has to be asked about.
+    """
+
+    spec = ToolSpec(
+        tool_id="app.force_close",
+        version="1.0.0",
+        description=(
+            "Terminate the process behind a window. Unsaved work in it is lost "
+            "and nothing is asked first. Only use this when the user has asked "
+            "for it explicitly after a normal close did not work — never as a "
+            "follow-up to app.close on your own initiative."
+        ),
+        input_model=AppForceCloseInput,
+        output_model=AppCloseOutput,
+        risk=RiskLevel.HIGH,
+        required_capabilities=("app.force_close",),
+        resource_locks=(FOREGROUND_DESKTOP,),
+        timeout_seconds=30.0,
+        retry_policy=RetryPolicy(max_attempts=1),
+        changes_state=True,
+        verification="Looks for the window afterwards.",
+        failure_codes=(
+            "windows_unavailable",
+            "no_such_window",
+            "sensitive_window",
+            "secure_desktop",
+            "force_close_failed",
+        ),
+        reversible=False,
+    )
+
+    def __init__(self, controller: WindowController) -> None:
+        self._controller = controller
+
+    def run(self, context: ToolContext, parameters: BaseModel) -> ToolExecution:
+        assert isinstance(parameters, AppForceCloseInput)
+        try:
+            report = _guarded(lambda: self._controller.force_close(parameters.window))
+        except ToolFailure:
+            raise
+        except Exception as exc:  # noqa: BLE001 - declared failure code
+            raise ToolFailure("force_close_failed", str(exc)) from exc
+        return _close_execution(report)
+
+
+def _guarded(action):
+    """Run a close, translating the guards into declared failure codes."""
+    try:
+        return action()
+    except SecureDesktopActive as exc:
+        raise ToolFailure("secure_desktop", str(exc)) from exc
+    except SensitiveWindowRefused as exc:
+        raise ToolFailure("sensitive_window", str(exc)) from exc
+    except KeyError as exc:
+        raise ToolFailure("no_such_window", str(exc.args[0])) from exc
+    except WindowsUnavailable as exc:
+        raise ToolFailure("windows_unavailable", str(exc)) from exc
+
+
+def _close_execution(report) -> ToolExecution:
+    return ToolExecution(
+        output=AppCloseOutput(
+            window=report.ref,
+            application=report.application,
+            outcome=report.outcome.value,
+            verified=report.verified,
+            detail=report.detail,
+        ),
+        # Waiting on the user is emphatically not success: nothing closed, and
+        # something is on screen needing an answer.
+        verification=Verification.VERIFIED if report.verified else Verification.UNVERIFIED,
+        message=report.detail,
+        evidence={"outcome": report.outcome.value},
+    )
+
+
 def register_window_tools(registry: object, discovery, controller) -> tuple[str, ...]:
-    """Register both window tools. Returns what was registered."""
-    tools = [WindowListTool(discovery), WindowArrangeTool(controller)]
+    """Register the window tools. Returns what was registered."""
+    tools = [
+        WindowListTool(discovery),
+        WindowArrangeTool(controller),
+        AppCloseTool(controller),
+        AppForceCloseTool(controller),
+    ]
     for tool in tools:
         registry.register(tool)  # type: ignore[attr-defined]
     return tuple(tool.spec.tool_id for tool in tools)

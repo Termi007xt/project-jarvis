@@ -23,6 +23,20 @@ has shipped yet.
   cloaked, tool, owned and zero-area windows are left out, filtered on Win32
   attributes rather than on a list of names that would be both incomplete and
   defeatable.
+- **Jarvis can close an application, and stops when it objects** (`app.close`,
+  FR-065, FR-066, AT-004). The request is the same one clicking the X sends, so
+  an application with unsaved work does what it should: it puts a save prompt
+  up. Jarvis notices structurally — a new dialog from the same process — and
+  stops there, leaving the prompt for you. It deliberately does not read the
+  dialog to decide, because that text is written by the application being
+  closed, and a "Save changes?" prompt is the single place where believing what
+  a window says about itself would cost the most.
+- **Force-close exists, separately, and asks every time** (`app.force_close`,
+  FR-067, AT-005). The first high-risk tool in the product: fresh confirmation
+  every time, no standing grant ever. A refused normal close never escalates to
+  it on its own, and there is no `force` flag on `app.close` — reaching it is a
+  decision a person makes, which a separate tool requires and a parameter would
+  not.
 - **Automation refuses windows that should not be touched** (FR-079, FR-081,
   AT-031). Credential managers, the Windows consent and logon surfaces, and any
   window whose own title names a secret. The refusal keys on process identity,
@@ -61,6 +75,14 @@ has shipped yet.
 
 ### Fixed
 
+- **"Bring this window to the front" reported success without checking.** It
+  confirmed only that the window was no longer minimised — which it usually was
+  not — while Windows routinely refuses `SetForegroundWindow` from a process
+  that does not already own the foreground. It now asks Windows which window
+  actually has it, so an activate that did nothing is reported as unverified.
+  The same shape as a launch reporting success because the browser was already
+  running: a check that cannot tell "my effect happened" from "something
+  unrelated was already true".
 - **A turn that ran out of steps reported failure for actions that had already
   succeeded.** "Move WhatsApp to the left half" moved the window and then said
   *"stopped after 4 rounds of tool calls… nothing further was run"*, which reads

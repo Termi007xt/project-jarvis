@@ -152,7 +152,6 @@ def is_user_facing(
     title: str,
     cloaked: bool,
     tool_window: bool,
-    owned: bool,
     bounds: tuple[int, int, int, int],
 ) -> bool:
     """Whether a person would call this an open window.
@@ -167,11 +166,18 @@ def is_user_facing(
     names would be both incomplete and defeatable, and the properties that
     actually distinguish these are structural: no caption, DWM-cloaked (which is
     what UWP leaves behind when its window is not really there), a tool window,
-    owned by another window, or no area at all.
+    or no area at all.
+
+    Ownership is deliberately *not* here. An owned window is a dialog, which is
+    a real window that simply is not one you would "arrange" — and it is exactly
+    what an application raises when it has unsaved work and is asked to close.
+    Excluding it at this level would make that prompt invisible to the one piece
+    of code that most needs to see it, so the distinction is drawn where it is
+    used, in `WindowDiscovery.list_windows(include_dialogs=...)`.
     """
     if not title.strip():
         return False
-    if cloaked or tool_window or owned:
+    if cloaked or tool_window:
         return False
     _, _, width, height = bounds
     return width > 0 and height > 0
@@ -196,6 +202,9 @@ class WindowInfo:
     #: On the sensitive list. Actions against it are refused, and the title
     #: above has already been replaced.
     sensitive: bool = False
+    #: Owned by another window — which is what a dialog is. Used to notice that
+    #: an application has asked something, never to read what it asked.
+    owned: bool = False
     #: The opaque token an action names this window by. Bound to the handle, so
     #: it keeps meaning this window however the desktop reorders — see
     #: `WindowDiscovery.resolve`.
@@ -276,7 +285,6 @@ class Win32WindowBackend:
                 tool_window=bool(
                     user32.GetWindowLongW(hwnd, -20) & 0x00000080  # WS_EX_TOOLWINDOW
                 ),
-                owned=bool(user32.GetWindow(hwnd, 4)),  # GW_OWNER
                 bounds=bounds,
             ):
                 return True
@@ -292,6 +300,10 @@ class Win32WindowBackend:
                     "bounds": bounds,
                     "state": _state_of(user32, hwnd),
                     "monitor": 0,
+                    # GW_OWNER. An owned window is a dialog: not something to
+                    # arrange, and exactly what an application raises when it
+                    # is asked to close with unsaved work.
+                    "owned": bool(user32.GetWindow(hwnd, 4)),
                 }
             )
             return True
@@ -437,8 +449,13 @@ class WindowDiscovery:
     def unavailable_reason(self) -> str | None:
         return self.backend.unavailable_reason()
 
-    def list_windows(self) -> list[WindowInfo]:
+    def list_windows(self, *, include_dialogs: bool = False) -> list[WindowInfo]:
         """Every visible top-level window, in enumeration order.
+
+        Dialogs are left out by default. They are real windows, but they are not
+        what "what's open?" means and not things to arrange. `include_dialogs`
+        is for the close path, which needs to notice that an application has
+        raised one — see `WindowController.close`.
 
         Raises `WindowsUnavailable` when the desktop cannot be read at all. A
         desktop that genuinely has no windows returns an empty list, which is a
@@ -450,7 +467,12 @@ class WindowDiscovery:
             )
 
         windows: list[WindowInfo] = []
-        for index, entry in enumerate(self.backend.list_windows()):
+        entries = [
+            entry
+            for entry in self.backend.list_windows()
+            if include_dialogs or not bool(entry.get("owned", False))
+        ]
+        for index, entry in enumerate(entries):
             title = str(entry.get("title", ""))
             process_name = str(entry.get("process_name", ""))
             verdict = self.sensitive.check(process_name=process_name, window_title=title)
@@ -467,6 +489,7 @@ class WindowDiscovery:
                     state=WindowState.parse(str(entry.get("state", "normal"))),
                     monitor=int(entry.get("monitor", 0)),
                     sensitive=not verdict.allowed,
+                    owned=bool(entry.get("owned", False)),
                     ref=self._ref_for(int(entry.get("handle", 0))),
                 )
             )

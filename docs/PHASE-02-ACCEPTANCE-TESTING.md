@@ -793,13 +793,86 @@ python -m pytest
 
 **You should see:** `1235 passed, 2 skipped`.
 
+---
+
+# Stage 4 (part 2) — closing applications
+
+## 4.8 — Closing asks, and stops when the app objects ⭐ **I need you for this one**
+
+`app.close` sends the same request clicking the X sends. The application decides
+what to do with it — and one with unsaved work is *supposed* to stop and ask.
+
+**Do:** open Notepad, type a few characters, do **not** save. Then ask Jarvis to
+close Notepad.
+
+**You should see:** Notepad's "Save changes?" prompt appears, and Jarvis says
+something like *"Notepad put a dialog up rather than closing — most likely
+unsaved work. It is on your screen and the answer is yours; Jarvis has not
+touched it and will not force the window shut."*
+
+**Then check:** Notepad is still running, and the prompt is still waiting for
+*you*. Jarvis must not answer it, and must not force anything.
+
+**Why I need you:** I could not automate this one. Windows only lets the process
+that already owns the foreground give it away, so my test script cannot bring
+Notepad forward, and its keystrokes land in the terminal instead — the document
+never becomes unsaved. The script reports `INCONCLUSIVE` rather than pretending.
+This is the one AT criterion in stage 4 that only a human can confirm.
+
+**Tell me:** what Jarvis said, and whether Notepad survived.
+
+## 4.9 — Force-close is separate, and asks every time
+
+**Do:** with Notepad still open and unsaved, ask Jarvis to *force* close it.
+
+**You should see:** a **fresh confirmation prompt** — and this one has no "always
+allow" and never will. `app.force_close` is the first high-risk tool in the
+product; PRD §11.1 means it can never hold a standing grant.
+
+**The property that matters:** a normal close that gets refused **never**
+escalates to this on its own. There is no `force=True` on `app.close`, and
+nothing in it can reach the force path. A close that quietly forced when refused
+would be indistinguishable from one that worked — right up until the first time
+it threw away something of yours.
+
+**Tell me:** if you are ever asked to confirm a force-close you did not ask for
+by name.
+
+## 4.10 — Something the lab caught about "bring to the front"
+
+`window.arrange` with `activate` used to report success whenever the window was
+merely not minimised. Windows only lets the process that already owns the
+foreground give it away, so the request routinely does nothing — and nothing
+noticed, because nothing asked.
+
+It now asks Windows which window actually has the foreground. **You may see
+"unverified" on an activate that visibly did nothing.** That is the honest
+answer, not a regression; the old "confirmed" was the wrong one.
+
+**Tell me:** if activate reports unverified while the window clearly *did* come
+forward. That would be the check being wrong in the other direction.
+
 ## Still to come in stage 4
 
-Not built yet, so don't test for them: close-before-force with unsaved-work
-detection (P2-APP-01), force-close confirmation (P2-APP-02), and screen capture
-with a visible indicator (P2-WIN-10/11). **ADR-0019 requires the Option D
-browser-profile decision to be revisited before screen capture ships** — I'll
-bring that to you before writing it, not after.
+Not built yet, so don't test for them: screen capture with a visible indicator
+(P2-WIN-10/11). **ADR-0019 requires the Option D browser-profile decision to be
+revisited before screen capture ships** — I'll bring that to you before writing
+it, not after.
+
+## 4.11 — Confirm the suite
+
+```powershell
+python -m pytest
+```
+
+**You should see:** `1248 passed, 2 skipped`.
+
+> **Read the exit code, not just that line.** On 2026-08-05 a run of this suite
+> returned `0xC0000005` — a native access violation — with no failure summary. It
+> did not reproduce, and your machine bugchecked the same afternoon with
+> `UNEXPECTED_STORE_EXCEPTION` after three earlier memory-shaped crashes, so it
+> is very likely the same instability rather than a defect here. If you see a
+> crash with no summary line, tell me the exit code.
 
 ---
 

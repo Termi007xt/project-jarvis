@@ -222,20 +222,42 @@ def test_the_listing_is_filtered_to_windows_a_person_would_recognise() -> None:
     """
     from jarvis.toolbox.windows import is_user_facing
 
-    assert is_user_facing(title="project-jarvis - IDE", cloaked=False, tool_window=False,
-                          owned=False, bounds=(0, 0, 1920, 1080))
+    assert is_user_facing(title="project-jarvis - IDE", cloaked=False,
+                          tool_window=False, bounds=(0, 0, 1920, 1080))
     # No title at all
     assert not is_user_facing(title="", cloaked=False, tool_window=False,
-                              owned=False, bounds=(0, 0, 800, 600))
+                              bounds=(0, 0, 800, 600))
     # DWM-cloaked: the UWP ghost windows ApplicationFrameHost leaves behind
     assert not is_user_facing(title="Settings", cloaked=True, tool_window=False,
-                              owned=False, bounds=(0, 0, 800, 600))
+                              bounds=(0, 0, 800, 600))
     # A tool window is chrome, not a window in its own right
     assert not is_user_facing(title="Toolbar", cloaked=False, tool_window=True,
-                              owned=False, bounds=(0, 0, 800, 600))
+                              bounds=(0, 0, 800, 600))
     # Zero-sized, like the USBLCD window at (-80, -80, 0, 0)
     assert not is_user_facing(title="XProg", cloaked=False, tool_window=False,
-                              owned=False, bounds=(-80, -80, 0, 0))
+                              bounds=(-80, -80, 0, 0))
+
+
+def test_dialogs_are_left_out_of_the_listing_but_not_out_of_existence() -> None:
+    """Ownership is a classification, not an existence test.
+
+    A dialog is a real window that simply is not one you would "arrange" — and
+    it is exactly what an application raises when it is asked to close with
+    unsaved work. Filtering it out at the backend would make that prompt
+    invisible to the one piece of code that most needs to see it, so the
+    distinction is drawn where it is used.
+    """
+    discovery = WindowDiscovery(
+        backend=FakeBackend(
+            [
+                _window(handle=1, title="Untitled - Notepad"),
+                _window(handle=2, title="Save changes?", owned=True),
+            ]
+        )
+    )
+
+    assert [w.handle for w in discovery.list_windows()] == [1]
+    assert [w.handle for w in discovery.list_windows(include_dialogs=True)] == [1, 2]
 
 
 def test_a_window_is_described_by_an_application_name_a_person_would_use() -> None:

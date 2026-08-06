@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, Protocol
 
 from jarvis.toolbox.sensitive import secure_desktop_active
@@ -51,6 +53,8 @@ __all__ = [
     "WindowActionReport",
     "WindowActionBackend",
     "Win32ActionBackend",
+    "CloseOutcome",
+    "CloseReport",
     "SecureDesktopActive",
     "SensitiveWindowRefused",
 ]
@@ -78,6 +82,28 @@ class WindowActionReport:
     detail: str
 
 
+class CloseOutcome(str, Enum):
+    """What happened when a window was asked to close (FR-065, FR-066)."""
+
+    #: Gone. Confirmed by looking, not by the request having been sent.
+    CLOSED = "closed"
+    #: The application raised a dialog. Yours to answer; Jarvis stops here.
+    WAITING_ON_USER = "waiting_on_user"
+    #: Still there, and nothing is asking. It simply declined.
+    STILL_OPEN = "still_open"
+
+
+@dataclass(frozen=True)
+class CloseReport:
+    """What was asked of a window, and what it did about it."""
+
+    ref: str
+    outcome: CloseOutcome
+    verified: bool
+    application: str
+    detail: str
+
+
 class WindowActionBackend(Protocol):
     """What the controller needs from a windowing implementation."""
 
@@ -86,6 +112,12 @@ class WindowActionBackend(Protocol):
     def set_state(self, handle: int, state: str) -> None: ...
 
     def move_resize(self, handle: int, x: int, y: int, width: int, height: int) -> None: ...
+
+    def request_close(self, handle: int) -> None: ...
+
+    def terminate(self, pid: int) -> None: ...
+
+    def foreground_handle(self) -> int: ...
 
 
 class Win32ActionBackend:
@@ -127,6 +159,45 @@ class Win32ActionBackend:
             user32.ShowWindow(handle, 9)  # SW_RESTORE
         user32.MoveWindow(handle, x, y, width, height, True)
 
+    def foreground_handle(self) -> int:
+        """Which window actually has the foreground, according to Windows."""
+        import ctypes
+
+        return int(ctypes.windll.user32.GetForegroundWindow())  # type: ignore[attr-defined]
+
+    def request_close(self, handle: int) -> None:
+        """`WM_CLOSE` — the message the X button sends.
+
+        Posted rather than sent, so a window that responds by raising a modal
+        dialog does not block this thread inside its message loop until somebody
+        answers it. Blocking there would hold the foreground lock while waiting
+        on a human, which is the deadlock this whole path exists to avoid.
+        """
+        import ctypes
+
+        ctypes.windll.user32.PostMessageW(handle, 0x0010, 0, 0)  # type: ignore[attr-defined]
+
+    def terminate(self, pid: int) -> None:
+        """End the process. Nothing is saved, and nothing is asked.
+
+        Only reachable through `app.force_close`, which is high risk and needs
+        fresh confirmation every time (PRD §11.1, AT-005).
+        """
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+        if not handle:
+            raise RuntimeError(
+                f"could not open process {pid} to close it. It may already have "
+                "exited, or it may be running at a higher integrity level than "
+                "Jarvis — which never elevates (ADR-0009)."
+            )
+        try:
+            kernel32.TerminateProcess(handle, 1)
+        finally:
+            kernel32.CloseHandle(handle)
+
 
 @dataclass
 class WindowController:
@@ -136,6 +207,14 @@ class WindowController:
     backend: WindowActionBackend
     #: Injected so the refusal is testable without a real UAC prompt.
     secure_desktop: Callable[[], bool] = secure_desktop_active
+    #: How long to let a window act on a close request before looking. Real
+    #: applications need a moment to raise their dialog; tests inject 0 so the
+    #: suite does not spend a second per case sleeping for real.
+    close_poll_seconds: float = 1.0
+
+    @property
+    def _close_poll_seconds(self) -> float:
+        return self.close_poll_seconds
 
     # -- guards -----------------------------------------------------------
     def _target(self, ref: str) -> WindowInfo:
@@ -195,10 +274,19 @@ class WindowController:
         after = self._reread(window.handle)
         if after is None:
             return self._vanished(ref, "activate", window)
-        # Foreground is not readable from the window list, so this reports what
-        # it can confirm — the window still exists and is no longer minimised —
-        # rather than claiming a foreground change it has not observed.
-        verified = after.state is not WindowState.MINIMISED
+
+        # Asked of Windows, not inferred from the window list.
+        #
+        # This used to check only that the window was no longer minimised,
+        # because the list does not carry focus — which meant "brought it to the
+        # front" was reported whenever it merely was not minimised. On
+        # 2026-08-05 a lab found `activate` reporting verified while the window
+        # never actually took the foreground: Windows refuses `SetForegroundWindow`
+        # from a process that does not already own it, and nothing noticed
+        # because nothing asked. The same vacuous-verification shape as
+        # `app.open` claiming success from a browser that was already running.
+        foreground = self._foreground_handle()
+        verified = foreground == window.handle
         return WindowActionReport(
             ref=ref,
             action="activate",
@@ -208,9 +296,24 @@ class WindowController:
             detail=(
                 f"brought '{after.process_name}' to the front."
                 if verified
-                else "the window was asked to come forward but is still minimised."
+                else (
+                    f"asked '{after.process_name}' to come forward, but Windows "
+                    "kept the foreground where it was. Windows only lets the "
+                    "process that already owns the foreground give it away, so "
+                    "this can fail through no fault of the request. Reporting it "
+                    "as unverified rather than as success."
+                )
             ),
         )
+
+    def _foreground_handle(self) -> int:
+        probe = getattr(self.backend, "foreground_handle", None)
+        if probe is None:
+            return 0
+        try:
+            return int(probe())
+        except Exception:  # noqa: BLE001 - an unanswerable probe is not a match
+            return 0
 
     @staticmethod
     def _vanished(ref: str, action: str, window: WindowInfo) -> WindowActionReport:
@@ -286,6 +389,110 @@ class WindowController:
                     f"{after.bounds}. Windows clamps to minimum sizes and to the "
                     "work area; reporting where it actually is."
                 )
+            ),
+        )
+
+
+    # -- closing ----------------------------------------------------------
+    def close(self, ref: str) -> CloseReport:
+        """Ask a window to close, and notice if it objects (FR-065, FR-066).
+
+        `WM_CLOSE` is a *request* — the same one clicking the X sends — and the
+        application decides what to do with it. An application with unsaved work
+        is supposed to stop and ask, so a refusal is the system working, not an
+        obstacle to route around.
+
+        The objection is detected structurally: after the request, if the window
+        is still there and a dialog has appeared from the same process, then
+        something is being asked. The dialog is deliberately **not read**. Its
+        text is authored by the application being closed, and a "Save changes?"
+        prompt is the single place where believing what a window says about
+        itself would cost the most. That one appeared is enough to stop; what it
+        says is the user's to judge.
+
+        This never escalates. Forcing is `force_close`, a different capability
+        at a different risk level, and it has to be asked for.
+        """
+        window = self._target(ref)
+        before = {
+            entry.handle
+            for entry in self.discovery.list_windows(include_dialogs=True)
+        }
+
+        self.backend.request_close(window.handle)
+        if self._close_poll_seconds:
+            time.sleep(self._close_poll_seconds)
+
+        after = self.discovery.list_windows(include_dialogs=True)
+        if not any(entry.handle == window.handle for entry in after):
+            return CloseReport(
+                ref=ref,
+                outcome=CloseOutcome.CLOSED,
+                verified=True,
+                application=window.process_name,
+                detail=f"closed {window.process_name}.",
+            )
+
+        asked = [
+            entry
+            for entry in after
+            if entry.handle not in before
+            and entry.pid == window.pid
+            and entry.owned
+        ]
+        if asked:
+            return CloseReport(
+                ref=ref,
+                outcome=CloseOutcome.WAITING_ON_USER,
+                verified=False,
+                application=window.process_name,
+                detail=(
+                    f"{window.process_name} put a dialog up rather than closing "
+                    "— most likely unsaved work. It is on your screen and the "
+                    "answer is yours; Jarvis has not touched it and will not "
+                    "force the window shut."
+                ),
+            )
+
+        return CloseReport(
+            ref=ref,
+            outcome=CloseOutcome.STILL_OPEN,
+            verified=False,
+            application=window.process_name,
+            detail=(
+                f"{window.process_name} was asked to close and is still open, "
+                "with nothing on screen asking anything. Reporting that rather "
+                "than assuming it worked."
+            ),
+        )
+
+    def force_close(self, ref: str) -> CloseReport:
+        """Terminate the process behind a window (FR-067, AT-005).
+
+        High risk, and reachable only by being asked for. Nothing in `close`
+        leads here: an automatic escalation would be indistinguishable from a
+        close that worked, right up until the first time it discarded somebody's
+        work.
+        """
+        window = self._target(ref)
+        self.backend.terminate(window.pid)
+        if self._close_poll_seconds:
+            time.sleep(self._close_poll_seconds)
+
+        gone = not any(
+            entry.handle == window.handle
+            for entry in self.discovery.list_windows(include_dialogs=True)
+        )
+        return CloseReport(
+            ref=ref,
+            outcome=CloseOutcome.CLOSED if gone else CloseOutcome.STILL_OPEN,
+            verified=gone,
+            application=window.process_name,
+            detail=(
+                f"force-closed {window.process_name}. Anything unsaved in it is gone."
+                if gone
+                else f"{window.process_name} was terminated but its window is "
+                "still listed, so the result is unconfirmed."
             ),
         )
 

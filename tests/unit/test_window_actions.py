@@ -55,9 +55,17 @@ class FakeActionBackend:
     def __init__(self, *, obeys: bool = True) -> None:
         self.calls: list[tuple] = []
         self.obeys = obeys
+        #: What Windows reports as the foreground. `activate` sets it when the
+        #: backend obeys, which is what a real one does when Windows allows it.
+        self.foreground = 0
 
     def activate(self, handle: int) -> None:
         self.calls.append(("activate", handle))
+        if self.obeys:
+            self.foreground = handle
+
+    def foreground_handle(self) -> int:
+        return self.foreground
 
     def set_state(self, handle: int, state: str) -> None:
         self.calls.append(("set_state", handle, state))
@@ -166,6 +174,37 @@ def test_nothing_moves_while_the_secure_desktop_is_up(call) -> None:
 # =========================================================================
 # Verification: asked is not done
 # =========================================================================
+def test_activate_is_confirmed_against_the_actual_foreground() -> None:
+    """Found by `tools/window-lab/test_close_before_force_live.py`, 2026-08-05.
+
+    Windows only lets the process that already owns the foreground give it
+    away, so `SetForegroundWindow` from a background process routinely does
+    nothing. This used to check only that the window was no longer minimised —
+    which it usually was not — so "brought it to the front" was reported for a
+    window that never came forward.
+
+    The same shape as `app.open` reporting verified success from a browser that
+    was already running: a check that cannot distinguish "my effect happened"
+    from "something unrelated was already true".
+    """
+    controller, actions = _controller([_window(state="normal")], obeys=False)
+
+    report = controller.activate(_ref(controller))
+
+    assert actions.calls, "the request was never made"
+    assert report.verified is False, (
+        "activate reported success for a window that never took the foreground"
+    )
+    assert "foreground" in report.detail.casefold()
+
+
+def test_activate_is_verified_when_the_window_really_comes_forward() -> None:
+    """The control: the honest case must still read as success."""
+    controller, _ = _controller([_window(state="normal")])
+    report = controller.activate(_ref(controller))
+    assert report.verified is True
+
+
 def test_a_state_change_is_confirmed_by_reading_it_back() -> None:
     windows = [_window(state="normal")]
     actions = FakeActionBackend()

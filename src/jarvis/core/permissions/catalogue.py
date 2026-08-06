@@ -97,6 +97,11 @@ _ALL: tuple[Capability, ...] = (
        "resize it. Medium rather than low because activating a window takes the "
        "foreground away from whatever you were doing.", 2,
        scope_kind="application"),
+    _c("app.close", "Close an application", _MEDIUM,
+       "Ask an application to close, the way clicking its X does. It may "
+       "refuse, and one that raises a save prompt is left alone for you to "
+       "answer. Never forces (that is app.force_close).", 2,
+       scope_kind="application"),
     _c("app.monitor", "Monitor an application", _MEDIUM,
        "Observe a named application's visible state.", 4, scope_kind="application"),
     _c("messages.copy_private", "Copy private messages", _MEDIUM,

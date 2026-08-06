@@ -274,6 +274,14 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # itself.
         "window.list",
         "window.arrange",
+        # Phase 2 stage 4 (P2-APP-01, P2-APP-02). Two tools, and the split is
+        # the whole control: `app.close` asks, the way clicking the X asks, and
+        # stops when the application raises a save prompt. `app.force_close`
+        # discards that work, and reaching it has to be a decision a person
+        # makes — which a separate tool requires and a `force=True` parameter
+        # would not.
+        "app.close",
+        "app.force_close",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"
@@ -282,13 +290,25 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
     # The invariant is no longer "everything is low risk" — Phase 2's browser
     # automation drives a profile that may hold live logins, and PRD section
     # 11.1 classes that as medium, so pretending otherwise would be the
-    # dishonesty this test exists to prevent. What must still hold is that
-    # nothing HIGH or PROHIBITED has been wired: force-close, deletion and
-    # elevation all remain unbuilt, and none of them may arrive unannounced.
+    # dishonesty this test exists to prevent.
+    #
+    # Phase 2 stage 4 added the first HIGH tool, `app.force_close` (FR-067,
+    # AT-005). It is named here one at a time rather than the check being
+    # relaxed to "high is allowed now": deletion, elevation, installing software
+    # and sending messages are all still unbuilt, and the value of this test is
+    # entirely in none of them arriving unannounced.
+    high_risk_by_design = {"app.force_close"}
     for spec in specs:
+        if spec.tool_id in high_risk_by_design:
+            assert spec.risk is RiskLevel.HIGH, (
+                f"{spec.tool_id} is listed as high-risk by design but declares "
+                f"{spec.risk.value}; losing unsaved work is not a medium-risk act"
+            )
+            continue
         assert spec.risk in (RiskLevel.LOW, RiskLevel.MEDIUM), (
             f"{spec.tool_id} is {spec.risk.value}; no phase has asked for a "
-            "high-risk or prohibited tool yet"
+            "high-risk or prohibited tool beyond "
+            f"{sorted(high_risk_by_design)}"
         )
 
 
@@ -327,7 +347,12 @@ def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
         "fs.read_approved",
         "fs.write_approved",
         "fs.delete_or_overwrite",
-        "app.force_close",
+        # `app.force_close` left this set in Phase 2 stage 4, when P2-APP-02
+        # built it (FR-067, AT-005). It is the first high-risk tool in the
+        # product, and it earns that by being the only way to lose unsaved work
+        # on purpose: fresh confirmation every time, no standing grant ever, and
+        # deliberately a separate tool from `app.close` so that reaching it is
+        # something a person decides rather than a parameter a model sets.
         "system.elevate",
     }
     for spec in core.registry.specs():
