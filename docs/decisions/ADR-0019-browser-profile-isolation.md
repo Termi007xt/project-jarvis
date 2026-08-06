@@ -138,6 +138,41 @@ Isolation and deletability both fall out of the existing vault design with minim
 ### Deferral cost
 Moderate. Nothing in Phase 0–1 depends on this, but Phase 2's exit criteria explicitly include "Brave dedicated profile" as a deliverable, so it must close before Phase 2 exit. Because this profile will accumulate live logins once built, retrofitting a *different* isolation mechanism after users have already authenticated under the first one means asking them to log in again — a bounded but real migration cost, cheaper to avoid by deciding once.
 
+## Revisit before screen capture — closed 2026-08-06
+
+This ADR required the Option D decision to be reconsidered **before screen
+capture ships**, because capture changes what Option D costs. Automation driving
+the owner's signed-in browser was a risk about *actions*. A camera pointed at the
+screen is a risk about *contents*: their mail, their bank, whatever is visible,
+written to disk in the vault and read by the local model.
+
+Put to the owner with three options — window-at-a-time, whole-screen, or
+whole-screen with the browser excluded. **They chose whole screen when asked**,
+knowing that every capture then contains whatever else was visible.
+
+Accepted, and Option D stands. What the decision changes:
+
+1. **The sensitive-application blocklist no longer protects what it appears
+   to.** It guards automation — it stops Jarvis *driving* a password manager. It
+   cannot stop a camera pointed at the whole screen, because the pixels are
+   taken wholesale and nothing is driven. Left unaddressed, the blocklist would
+   look like a control over captures and not be one.
+2. **So the protection moves into the image.** Every window on the list has a
+   known rectangle, and those rectangles are filled black *before* anything is
+   written to disk, so the pixels never exist in a file
+   (`jarvis.toolbox.capture`, `tests/security/test_screen_capture.py`). Blacked
+   out rather than refused, because refusing every capture taken while a vault
+   is open would make the feature useless; black rather than blurred, because a
+   blur is a reversible transform of what it hides.
+3. **Nothing is captured invisibly** (FR-271). The indicator is a constructor
+   dependency and is shown *before* the grab; a capture with no way to announce
+   itself refuses rather than proceeding quietly. Same shape as
+   `AutomationSession` refusing to start when it cannot observe interruption.
+4. **Still open, and named here so it is not forgotten:** retention. A
+   full-screen BMP is ~15 MB, and captures accumulate in the vault. The
+   retention policy in `PROJECT_INPUTS.md` has to be enforced before this is
+   used routinely, or "delete all my data" becomes the only cleanup that exists.
+
 ## Related
 
 ADR-0018 (search provider — FR-052/FR-055 execute inside this profile), ADR-0020 (skill signing — recorded skills that replay browser actions inherit this profile's trust boundary), ARCHITECTURE.md §3, §6.4, §11.1, PRD §14.2, NFR-025.
