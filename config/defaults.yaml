@@ -192,7 +192,14 @@ ui:
   approval_timeout_seconds: 120.0
 
 storage:
+  # Where the speech models are kept. Applied to HF_HOME at start-up, so the
+  # weights live under Jarvis rather than in the library's own profile cache.
+  # An HF_HOME you exported yourself wins.
   huggingface_home: "%LOCALAPPDATA%\\ProjectJarvis\\models\\huggingface"
+  # Load speech weights from disk only. The network is for downloading a model
+  # that is missing, never for checking one you already have — that check ran
+  # on every spoken reply.
+  speech_models_local_only: true
   application_data: "%LOCALAPPDATA%\\ProjectJarvis"
   workspace: "%USERPROFILE%\\Documents\\Jarvis Workspace"
 

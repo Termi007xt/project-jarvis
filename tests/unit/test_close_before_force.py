@@ -39,8 +39,18 @@ from jarvis.toolbox.windows import WindowDiscovery
 
 
 class FakeBackend:
-    def __init__(self, windows):
+    """A desktop. ``alive`` is what the OS would say to `IsWindow`.
+
+    Deliberately two separate things. A window can stop being *listed* — hidden,
+    untitled, cloaked — while still existing, and the whole of the 2026-08-06
+    bug is that those were treated as one.
+    """
+
+    def __init__(self, windows, alive=None):
         self.windows = windows
+        #: Handles that still exist, whether or not they are listed. ``None``
+        #: means "same as listed", which is how a plain desktop behaves.
+        self.alive = alive
 
     def is_available(self):
         return True
@@ -50,6 +60,11 @@ class FakeBackend:
 
     def list_windows(self):
         return [dict(window) for window in self.windows]
+
+    def window_exists(self, handle):
+        if self.alive is None:
+            return any(window["handle"] == handle for window in self.windows)
+        return handle in self.alive
 
 
 class FakeActions:
@@ -76,6 +91,9 @@ class FakeActions:
     def terminate(self, pid):
         self.calls.append(("terminate", pid))
 
+    def foreground_handle(self):
+        return 0
+
 
 def _window(**overrides):
     base = {
@@ -92,9 +110,9 @@ def _window(**overrides):
     return base
 
 
-def _controller(windows, *, on_close=None):
+def _controller(windows, *, on_close=None, alive=None):
     actions = FakeActions(on_close=on_close)
-    discovery = WindowDiscovery(backend=FakeBackend(windows))
+    discovery = WindowDiscovery(backend=FakeBackend(windows, alive=alive))
     controller = WindowController(
         discovery=discovery,
         backend=actions,
@@ -136,6 +154,97 @@ def test_a_window_that_is_still_there_is_not_reported_as_closed() -> None:
 
     assert report.outcome is CloseOutcome.STILL_OPEN
     assert report.verified is False
+
+
+# =========================================================================
+# Gone from the list is not gone
+# =========================================================================
+def test_a_window_that_merely_hid_itself_is_not_reported_as_closed() -> None:
+    """Reported by the owner on 2026-08-06, and the worst kind of bug here.
+
+    A music tab was playing in Microsoft Edge, which asks before it will close.
+    Jarvis said *"Microsoft Edge has been closed"* — **verified** — and Edge was
+    still on screen. Notepad, minutes earlier, had closed correctly.
+
+    The difference is what the two applications do with `WM_CLOSE`. Notepad
+    destroys its window. Chromium hides the frame and keeps it alive while it
+    asks, which `BrowserView::CanClose()` does explicitly. `close` decided by
+    asking whether the window was still in `list_windows`, and that list is not
+    a list of windows that *exist* — it is the list of windows a person would
+    call open, which drops the invisible, the untitled and the cloaked on
+    purpose, because that filter is what turned a listing of eleven windows into
+    the four the owner actually had.
+
+    So the two questions have to be asked separately: still on screen is a
+    question about presentation, still there is a question about existence, and
+    only the second one is what "closed" means.
+    """
+    windows = [_window()]
+
+    def hides_and_asks():
+        # Still alive — it just stopped being presentable, exactly as a
+        # Chromium frame does while a confirmation is pending.
+        windows.clear()
+
+    controller, actions, discovery = _controller(
+        windows, on_close=hides_and_asks, alive={1001}
+    )
+
+    report = controller.close(_ref(discovery))
+
+    assert report.outcome is not CloseOutcome.CLOSED, (
+        "a window that is merely off screen was reported as closed; this is the "
+        "Edge bug, and 'verified' has to mean the window is gone"
+    )
+    assert report.verified is False
+    assert not any(call[0] == "terminate" for call in actions.calls)
+
+
+def test_a_hidden_window_is_not_described_as_nothing_asking() -> None:
+    """The detail has to survive the case it is wrong about.
+
+    Chromium asks inside its own window: the prompt is drawn in the page, not
+    raised as a top-level dialog, so there is no new window for Jarvis to
+    notice. Saying "nothing on screen is asking anything" would then be a
+    confident statement about the exact thing that was happening.
+    """
+    windows = [_window(process_name="msedge.exe", title="Music — Edge")]
+    controller, _, discovery = _controller(
+        windows, on_close=windows.clear, alive={1001}
+    )
+
+    report = controller.close(_ref(discovery))
+
+    assert "nothing" not in report.detail.lower(), report.detail
+    assert "still" in report.detail.lower() or "running" in report.detail.lower()
+
+
+def test_a_destroyed_window_is_still_reported_as_closed() -> None:
+    """The control. Fixing the false success must not cost the true one."""
+    windows = [_window()]
+    controller, _, discovery = _controller(
+        windows, on_close=windows.clear, alive=set()
+    )
+
+    report = controller.close(_ref(discovery))
+
+    assert report.outcome is CloseOutcome.CLOSED
+    assert report.verified is True
+
+
+def test_existence_is_asked_of_the_operating_system() -> None:
+    """The real backend must be able to answer it, or the fix is only in tests.
+
+    The same failure this codebase has now produced four times: a correct
+    mechanism wired to nothing. If `Win32WindowBackend` cannot answer, discovery
+    silently falls back to the window list and the bug returns unnoticed.
+    """
+    from jarvis.toolbox.windows import Win32WindowBackend
+
+    assert hasattr(Win32WindowBackend, "window_exists"), (
+        "the Win32 backend cannot tell existence from presentability, so the "
+        "close path would be back to guessing from the list"
+    )
 
 
 # =========================================================================

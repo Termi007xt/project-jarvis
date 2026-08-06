@@ -85,12 +85,20 @@ class WindowActionReport:
 class CloseOutcome(str, Enum):
     """What happened when a window was asked to close (FR-065, FR-066)."""
 
-    #: Gone. Confirmed by looking, not by the request having been sent.
+    #: Gone. The window no longer exists, asked of the OS by handle.
     CLOSED = "closed"
     #: The application raised a dialog. Yours to answer; Jarvis stops here.
     WAITING_ON_USER = "waiting_on_user"
-    #: Still there, and nothing is asking. It simply declined.
+    #: Still there, on screen, and nothing is asking. It simply declined.
     STILL_OPEN = "still_open"
+    #: The window is off screen but still exists, so the application is still
+    #: running. Either it is mid-close, or it is asking something Jarvis cannot
+    #: see — Chromium draws its "leave site?" prompt inside the page rather than
+    #: as a window, so there is nothing to notice from the outside. Named rather
+    #: than folded into the two above, because calling this `closed` was the
+    #: 2026-08-06 bug and calling it `still_open, nothing asking` would be a
+    #: confident claim about the case it is most often wrong about.
+    STILL_RUNNING = "still_running"
 
 
 @dataclass(frozen=True)
@@ -207,10 +215,11 @@ class WindowController:
     backend: WindowActionBackend
     #: Injected so the refusal is testable without a real UAC prompt.
     secure_desktop: Callable[[], bool] = secure_desktop_active
-    #: How long to let a window act on a close request before looking. Real
-    #: applications need a moment to raise their dialog; tests inject 0 so the
-    #: suite does not spend a second per case sleeping for real.
-    close_poll_seconds: float = 1.0
+    #: How long to let a window act on a close request. Polled, not slept: the
+    #: check returns the moment the window is destroyed, so this is a ceiling
+    #: for a slow application rather than a cost every close pays. Tests inject
+    #: 0, which looks exactly once.
+    close_poll_seconds: float = 3.0
 
     @property
     def _close_poll_seconds(self) -> float:
@@ -410,6 +419,15 @@ class WindowController:
         itself would cost the most. That one appeared is enough to stop; what it
         says is the user's to judge.
 
+        **Closed means the window no longer exists**, asked of the OS by handle,
+        and not "it is no longer in the window list". Those were the same test
+        until 2026-08-06, when closing Microsoft Edge with a playing tab
+        reported a verified success while Edge was still on screen asking
+        whether to leave the page. `list_windows` answers *would a person call
+        this open* — it drops the invisible, the untitled and the cloaked, which
+        is what makes a listing readable — and Chromium hides its frame while a
+        close is pending, so it fell out of that list while entirely alive.
+
         This never escalates. Forcing is `force_close`, a different capability
         at a different risk level, and it has to be asked for.
         """
@@ -420,11 +438,9 @@ class WindowController:
         }
 
         self.backend.request_close(window.handle)
-        if self._close_poll_seconds:
-            time.sleep(self._close_poll_seconds)
+        after = self._settle(window.handle)
 
-        after = self.discovery.list_windows(include_dialogs=True)
-        if not any(entry.handle == window.handle for entry in after):
+        if not self.discovery.window_exists(window.handle):
             return CloseReport(
                 ref=ref,
                 outcome=CloseOutcome.CLOSED,
@@ -454,6 +470,24 @@ class WindowController:
                 ),
             )
 
+        if not any(entry.handle == window.handle for entry in after):
+            # It exists but is no longer on screen. Chromium does this while it
+            # asks; the prompt is drawn inside the page, so there is no window
+            # to notice. Saying "nothing is asking" here would be a confident
+            # statement about exactly the case this is usually wrong about.
+            return CloseReport(
+                ref=ref,
+                outcome=CloseOutcome.STILL_RUNNING,
+                verified=False,
+                application=window.process_name,
+                detail=(
+                    f"{window.process_name} has not closed — it is still "
+                    "running and its window has gone off screen, which usually "
+                    "means it is asking you to confirm. Have a look and answer "
+                    "it; Jarvis will not force it shut."
+                ),
+            )
+
         return CloseReport(
             ref=ref,
             outcome=CloseOutcome.STILL_OPEN,
@@ -466,6 +500,26 @@ class WindowController:
             ),
         )
 
+    def _settle(self, handle: int) -> list[WindowInfo]:
+        """Give the application its moment, and stop as soon as it has answered.
+
+        A single sleep has to be long enough for the slowest application, which
+        makes every close cost that. Polling returns the instant the window is
+        destroyed or a dialog appears, so the common case is fast and a slow
+        close is still given its full time rather than being called a refusal.
+        """
+        if not self._close_poll_seconds:
+            return self.discovery.list_windows(include_dialogs=True)
+
+        deadline = time.monotonic() + self._close_poll_seconds
+        listed = self.discovery.list_windows(include_dialogs=True)
+        while time.monotonic() < deadline:
+            if not self.discovery.window_exists(handle):
+                return listed
+            time.sleep(min(0.25, self._close_poll_seconds))
+            listed = self.discovery.list_windows(include_dialogs=True)
+        return listed
+
     def force_close(self, ref: str) -> CloseReport:
         """Terminate the process behind a window (FR-067, AT-005).
 
@@ -476,13 +530,11 @@ class WindowController:
         """
         window = self._target(ref)
         self.backend.terminate(window.pid)
-        if self._close_poll_seconds:
-            time.sleep(self._close_poll_seconds)
+        self._settle(window.handle)
 
-        gone = not any(
-            entry.handle == window.handle
-            for entry in self.discovery.list_windows(include_dialogs=True)
-        )
+        # Existence, not presence in the list — same distinction as `close`. A
+        # terminated process's window is destroyed, so this is a real check.
+        gone = not self.discovery.window_exists(window.handle)
         return CloseReport(
             ref=ref,
             outcome=CloseOutcome.CLOSED if gone else CloseOutcome.STILL_OPEN,

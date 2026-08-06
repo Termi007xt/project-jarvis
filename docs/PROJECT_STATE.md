@@ -1,18 +1,19 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-05 (Phase 2 stage 3 — six defects from a live session, fixed)
+- **Last updated:** 2026-08-06 (Phase 2 stage 4 — window management, close, capture)
 - **Current branch:** `feat/PHASE-2-development`. Phase 1 **is already merged** —
   `main` is at `b9e73e0`, merge of PR #2.
 - **Version:** `0.2.0.dev0`
 - **Active phase:** **Phase 2 — deterministic desktop and browser automation.**
-  **Stage 0 in progress.** Plan: `docs/phase-plans/PHASE-02-PLAN.md`.
-  Work items: `docs/BACKLOG.md` §5.
+  **Stage 4 in progress** (P2-WIN-06 … P2-WIN-11, P2-APP-01, P2-APP-02).
+  Plan: `docs/phase-plans/PHASE-02-PLAN.md`. Work items: `docs/BACKLOG.md` §5.
 - **Delivery mode:** **checkpoint after every stage** (decided 2026-08-04, and
   deliberately *not* Phase 1's continuous run — see the plan §2.1/§2.2).
-- **Overall status:** Green. `python -m pytest` → **1156 passed, 2 skipped**,
-  exit 0 (2026-08-05). `tests/security` → 299 passed, 1 skipped.
-  `python -m jarvis.main --check` → exit 0, ten tools registered. Nothing is blocked.
+- **Overall status:** Green. `python -m pytest` → **1279 passed, 2 skipped**,
+  exit 0 (2026-08-06). `python -m jarvis.main --check` → exit 0. Nothing is
+  blocked. Stage 4 items awaiting the owner's acceptance testing are listed in
+  `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.16.
 
 > **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
 > add another `-q` — two of them suppress pytest's final `N passed` line, which
@@ -140,6 +141,70 @@ that change what the product can do:
   confirms FR-011 empirically rather than by assertion.
 
 ## In Progress
+
+### 2026-08-06 — stage 4: a false `verified`, and two things that were wired to nothing
+
+**The Edge close bug is the important one.** The owner closed Notepad (worked),
+then closed Microsoft Edge with a media tab that prompts before leaving. Jarvis
+reported *"Microsoft Edge has been closed"*, **verified**, and Edge was still on
+screen.
+
+`WindowController.close` decided by asking whether the window was still in
+`WindowDiscovery.list_windows`. That list answers *would a person call this
+open* — it drops the invisible, the untitled, the DWM-cloaked and the zero-area
+ghosts, which is precisely the filter that turned a listing of eleven windows
+into the owner's four. Chromium hides its frame while a close is pending
+(`BrowserView::CanClose()`), so Edge left that list while entirely alive.
+
+Reproduced before any fix, with Character Map standing in for Edge
+(`tools/window-lab/test_close_verification_live.py`): `outcome=closed
+verified=True` about a window with `exists=True visible=False`.
+
+Fixed by separating the two questions. `WindowDiscovery.window_exists` asks
+`IsWindow`; presentability stays in `list_windows`. A window that exists but is
+off screen is a new outcome, `still_running`, rather than either of the existing
+two — calling it `closed` was the bug, and calling it `still_open, nothing
+asking` would be a confident claim about the case it is most often wrong about,
+since Chromium draws its prompt inside the page where nothing can see it.
+
+**Two more "built but unreachable".** This is now the fifth and sixth instance
+of the pattern in this project:
+
+- `screen.capture` (P2-WIN-10) existed as a fully tested core with no tool. It
+  is now registered through `attach_shell`, so it exists only when something can
+  show the capture indicator — the same choice `notify.show` makes, and a
+  stronger one, because a capture nobody can see is the thing FR-271 forbids.
+  `tests/unit/test_capture_tool_wiring.py` asserts the registered tool reaches
+  the real GDI grab, not a stub.
+- `storage.huggingface_home` had named a directory since Phase 1 and **nothing
+  ever read it**. The owner's models were in the right place only because they
+  had exported `HF_HOME` by hand.
+
+**Speech models are local-only by default now.** The owner's log showed a
+`HEAD https://huggingface.co/...` on the path of *every spoken reply*: Kokoro
+resolves voice tensors at synthesis time and `huggingface_hub` revalidates
+cached files. faster-whisper does the same once at load. Offline mode was the
+wrong switch — the owner is not offline, they want the weights local — so
+`storage.speech_models_local_only` (default on) pins the hubs in every network
+mode. The network is for fetching a model that is missing, never for confirming
+one already present.
+
+While fixing it: the previous control was **partly ineffective and its test was
+vacuous**. `huggingface_hub` reads `HF_HUB_OFFLINE` into `constants` at *import*,
+not at model load, so setting it afterwards changed nothing — and the test
+asserted only that the environment variable was set, which it always was. The
+library is now updated in place and the test checks what the library believes.
+
+**P2-WIN-11 shipped as the honest half of FR-270.** `screen.active_window` names
+the window in front and says plainly that Jarvis cannot read what is inside it.
+Describing contents needs a vision model (Phase 4); assembling a description
+from the window title would be inventing, and the title is application-authored
+text besides.
+
+**Capture retention is bounded, not solved.** A full-screen BMP is ~15 MB, so
+`prune_captures` keeps the newest 20. `privacy.screenshot_retention` describes
+what the product should eventually do and is **not** implemented — named here so
+the bound is not mistaken for the policy.
 
 ### 2026-08-05 — the session that found six defects, and what changed
 
@@ -518,10 +583,39 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Start here (2026-08-05).** The six fixes above are committed and the suite is
-green, but **none of the browser path has been exercised end to end on real
-hardware since they landed** — and this phase has now twice found that a green
-suite says nothing about the seams. In order:
+**Start here (2026-08-06).** Stage 4 is code-complete and green (1279 passed, 2
+skipped, exit 0), and **the owner has not yet exercised any of part 2**. This
+phase has now found five times that a green suite says nothing about the seams,
+so acceptance comes before anything new. In order:
+
+1. **Owner runs `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.16.** §4.12 is
+   the retry of their own Edge repro and is the one that matters: play something
+   in Edge that prompts on close, ask Jarvis to close it, and confirm it never
+   says "closed". §4.13 capture, §4.14 "what's on my screen", §4.15 the speech
+   logs.
+
+2. **Then close stage 4:** `graphify . --update`, phase notes, and the stage
+   commit.
+
+3. **Still open and deliberately not done:**
+   - `privacy.screenshot_retention` is not implemented; captures are only
+     bounded to the newest 20.
+   - Reading screen *contents* needs a vision model — Phase 4 (P4-VIS-01).
+   - The all-tabs-autoplay limitation under Playwright is still documented
+     rather than fixed; the single-tab CDP replacement is spiked and proven but
+     not applied.
+   - Sensitive-application acceptance testing is deferred by the owner (they use
+     none of those applications).
+
+**The earlier stage-3 steps below are superseded by acceptance, not cancelled.**
+
+---
+
+### Superseded (2026-08-05)
+
+The six fixes above are committed and the suite is green, but **none of the
+browser path has been exercised end to end on real hardware since they landed**.
+In order:
 
 0. **Live-test the restart path.** With Brave open, ask for a YouTube search.
    Expect: `youtube.search` fails `browser_restart_required` → the planner calls

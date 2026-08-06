@@ -136,7 +136,17 @@ class ScreenCapture:
 
         # Before the image exists, not after. A notice that arrives once the
         # picture has been taken is a record, not an indication.
-        self.indicator(f"Jarvis is capturing {scope}.")
+        try:
+            self.indicator(f"Jarvis is capturing {scope}.")
+        except Exception as exc:  # noqa: BLE001 - refused, never swallowed
+            # An indicator that failed is the same situation as no indicator at
+            # all, and must reach the same answer. Logging it and carrying on
+            # would take the picture with nothing shown, which is the single
+            # outcome this path exists to prevent.
+            raise CaptureRefused(
+                "the capture indicator could not be shown, so nothing was "
+                f"captured: {type(exc).__name__}: {exc}"
+            ) from exc
 
         windows = self.discovery.list_windows()
         regions = redacted_regions(windows, self.discovery.sensitive)

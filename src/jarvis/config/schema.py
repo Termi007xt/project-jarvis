@@ -275,6 +275,12 @@ class StorageConfig(_Base):
     huggingface_home: str
     application_data: str
     workspace: str
+    #: Resolve speech weights from disk alone, in every network mode. On means
+    #: the network is only ever used to *fetch a model that is missing*, which
+    #: is a deliberate act, and never to revalidate one already downloaded.
+    #: Kokoro loads its voice tensors at synthesis time, so revalidation put a
+    #: remote request on the path of every spoken reply (observed 2026-08-06).
+    speech_models_local_only: bool = True
 
 
 class PrivacyConfig(_Base):

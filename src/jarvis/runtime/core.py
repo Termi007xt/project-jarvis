@@ -62,6 +62,15 @@ from jarvis.tasks.store import TaskStore
 from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
 from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
 from jarvis.toolbox.phase2_tools import BrowserWorkspace, register_phase2_tools
+from jarvis.toolbox.capture import (
+    ScreenCapture,
+    default_capture_directory,
+    gdi_screen_grab,
+)
+from jarvis.toolbox.phase2_capture_tools import (
+    ScreenCaptureTool,
+    register_capture_tool,
+)
 from jarvis.toolbox.phase2_window_tools import register_window_tools
 from jarvis.toolbox.window_actions import Win32ActionBackend, WindowController
 from jarvis.toolbox.windows import WindowDiscovery
@@ -312,6 +321,16 @@ class JarvisCore:
             self.registry, self.window_discovery, self.window_controller
         )
 
+        # 9d. screen capture (P2-WIN-10). Built here so the blocklist is the
+        # same object the window tools use — a window Jarvis refuses to arrange
+        # is the same window blacked out of an image. The indicator is left
+        # unset: only a shell can show one, so `attach_shell` supplies it and
+        # the tool does not exist until it does.
+        self.capture_directory = default_capture_directory(self.paths.root)
+        self.screen_capture = ScreenCapture(
+            discovery=self.window_discovery, grab=gdi_screen_grab
+        )
+
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
 
@@ -354,17 +373,39 @@ class JarvisCore:
         )
         return self
 
-    def attach_shell(self, notify: object) -> str | None:
-        """Let the shell supply what only it can: desktop notifications.
+    def attach_shell(
+        self, notify: object, capture_indicator: object | None = None
+    ) -> tuple[str, ...]:
+        """Let the shell supply what only it can: notifications, and the light.
 
         ``notify.show`` is registered here rather than at start-up because
         without a shell there is nothing to show a notification on, and a tool
         that always fails looks like a defect rather than an absence (ADR-0010).
+
+        ``screen.capture`` is registered on the same terms and for a stronger
+        reason. Jarvis does not photograph the screen without showing that it is
+        happening, and only the shell can show anything — so with no indicator
+        there is no capture tool at all, rather than a tool that captures
+        quietly. Returns the ids that were registered.
         """
-        if self.registry.get(NotifyTool.spec.tool_id) is not None:
-            return None
-        self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
-        return NotifyTool.spec.tool_id
+        registered: list[str] = []
+
+        if self.registry.get(NotifyTool.spec.tool_id) is None:
+            self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
+            registered.append(NotifyTool.spec.tool_id)
+
+        if (
+            capture_indicator is not None
+            and self.registry.get(ScreenCaptureTool.spec.tool_id) is None
+        ):
+            self.screen_capture.indicator = capture_indicator  # type: ignore[assignment]
+            tool_id = register_capture_tool(
+                self.registry, self.screen_capture, self.capture_directory
+            )
+            if tool_id:
+                registered.append(tool_id)
+
+        return tuple(registered)
 
     def _build_conversation_engine(self) -> ConversationEngine:
         planner = self.models.resolve(ModelRole.CONVERSATION)

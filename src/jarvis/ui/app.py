@@ -53,6 +53,11 @@ class JarvisApplication(QObject):
     hotkeyFired = Signal(str)
     recordingChanged = Signal(bool)
     notificationRequested = Signal(str, str)
+    #: A capture is about to be taken. Separate from ``notificationRequested``
+    #: because this one is not optional: it is the thing that makes photographing
+    #: the screen permissible at all (FR-271), and it must not be lost among
+    #: ordinary tool notifications.
+    captureStarted = Signal(str)
 
     def __init__(self, core: JarvisCore, app: QApplication) -> None:
         super().__init__()
@@ -89,7 +94,7 @@ class JarvisApplication(QObject):
 
         # Only a shell can show a notification, so notify.show is registered
         # now rather than at start-up (ADR-0010).
-        core.attach_shell(self._notify_from_tool)
+        core.attach_shell(self._notify_from_tool, self._capture_indicator)
 
         self.hotkeys = self._register_hotkeys()
 
@@ -192,6 +197,7 @@ class JarvisApplication(QObject):
         self.hotkeyFired.connect(self._on_hotkey, queued)
         self.recordingChanged.connect(self._on_recording_changed, queued)
         self.notificationRequested.connect(self.tray.notify, queued)
+        self.captureStarted.connect(self._show_capture_indicator, queued)
 
     # -- event handling ----------------------------------------------------
     def _on_event(self, event: Event) -> None:
@@ -521,6 +527,26 @@ class JarvisApplication(QObject):
             _LOG.exception("could not show a notification")
             return False
         return True
+
+    # -- capture indicator (FR-271) ---------------------------------------
+    def _capture_indicator(self, message: str) -> None:
+        """Backs the capture indicator. Called from the invoker's worker.
+
+        Raised *before* the pixels are read, which is the ordering the capture
+        core enforces. Whether the shell has finished painting a toast by then
+        is the shell's business and is not claimed here — what matters is that
+        no capture is taken without the notice being raised, and that a shell
+        which cannot raise it stops the capture instead.
+
+        Anything that goes wrong propagates. A silent failure here would leave a
+        screenshot taken with nothing shown, which is the one outcome this whole
+        path exists to prevent.
+        """
+        self.captureStarted.emit(message)
+
+    def _show_capture_indicator(self, message: str) -> None:
+        """Runs on the Qt main thread."""
+        self.tray.notify("Jarvis is capturing the screen", message)
 
     # -- hotkeys (PRD 11.3, FR-018) ---------------------------------------
     def _register_hotkeys(self) -> GlobalHotkeys:

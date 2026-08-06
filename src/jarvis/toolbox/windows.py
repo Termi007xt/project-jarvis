@@ -225,6 +225,8 @@ class WindowBackend(Protocol):
 
     def list_windows(self) -> list[dict[str, Any]]: ...
 
+    def window_exists(self, handle: int) -> bool: ...
+
 
 class Win32WindowBackend:
     """The real backend, via ctypes. Windows only.
@@ -310,6 +312,40 @@ class Win32WindowBackend:
 
         user32.EnumWindows(callback_type(visit), 0)
         return found
+
+    def foreground_handle(self) -> int:
+        """Which window has the foreground, according to Windows.
+
+        A read, so it belongs with discovery rather than with the controller —
+        and asked of the OS rather than inferred from enumeration order, because
+        `EnumWindows` returns z-order and z-order is not focus.
+        """
+        if os.name != "nt":
+            return 0
+        import ctypes
+
+        return int(ctypes.windll.user32.GetForegroundWindow())  # type: ignore[attr-defined]
+
+    def window_exists(self, handle: int) -> bool:
+        """Whether this is still a window at all — `IsWindow`, nothing else.
+
+        A different question from "is it in `list_windows`", and the distinction
+        is the whole of the 2026-08-06 close bug. That list answers *would a
+        person call this open*, so it drops the invisible, the untitled, the
+        cloaked and the zero-area — and an application that answers `WM_CLOSE`
+        by hiding its window while it asks a question is dropped by it while
+        being entirely alive. `IsWindow` asks the OS about the handle and knows
+        nothing about presentation.
+
+        Handle reuse can make this say "still there" about a recycled handle.
+        That errs toward `unverified`, which is the safe direction: the failure
+        it prevents is claiming something closed when it did not.
+        """
+        if os.name != "nt":
+            return False
+        import ctypes
+
+        return bool(ctypes.windll.user32.IsWindow(handle))  # type: ignore[attr-defined]
 
 
 def _is_cloaked(hwnd: int) -> bool:
@@ -495,6 +531,54 @@ class WindowDiscovery:
             )
         _LOG.debug("listed %d window(s)", len(windows))
         return windows
+
+    def window_exists(self, handle: int) -> bool:
+        """Does this window still exist? Not: is it still on screen.
+
+        `list_windows` deliberately answers the second question — it is what
+        "what's open?" means, and the filtering behind it is why a listing of
+        eleven windows became the four the owner actually had. Using it for the
+        first question is what made a close of Microsoft Edge report success
+        while Edge was still there, asking whether to leave the page.
+
+        A backend that cannot tell the two apart falls back to the list, which
+        is the old behaviour and no worse; `Win32WindowBackend` can, and
+        `tests/unit/test_close_before_force.py` asserts that it still does, so
+        the fallback cannot quietly become the normal path.
+        """
+        probe = getattr(self.backend, "window_exists", None)
+        if probe is not None:
+            return bool(probe(handle))
+        return any(
+            window.handle == handle
+            for window in self.list_windows(include_dialogs=True)
+        )
+
+    def foreground_window(self) -> WindowInfo | None:
+        """The window the user is actually looking at, or None (FR-270).
+
+        Returns None rather than guessing when nothing can be identified — the
+        foreground may be a window the listing filters out, or the desktop
+        itself. "I cannot tell" is a real answer and a better one than naming
+        whatever happened to be first.
+        """
+        probe = getattr(self.backend, "foreground_handle", None)
+        if probe is None:
+            return None
+        try:
+            handle = int(probe())
+        except Exception:  # noqa: BLE001 - an unanswerable probe means "unknown"
+            return None
+        if not handle:
+            return None
+        return next(
+            (
+                window
+                for window in self.list_windows(include_dialogs=True)
+                if window.handle == handle
+            ),
+            None,
+        )
 
     def as_observed_list(self) -> ObservedList:
         """Hand the desktop onward as untrusted, positionally-addressed content."""

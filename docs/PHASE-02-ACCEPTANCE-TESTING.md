@@ -852,13 +852,6 @@ answer, not a regression; the old "confirmed" was the wrong one.
 **Tell me:** if activate reports unverified while the window clearly *did* come
 forward. That would be the check being wrong in the other direction.
 
-## Still to come in stage 4
-
-Not built yet, so don't test for them: screen capture with a visible indicator
-(P2-WIN-10/11). **ADR-0019 requires the Option D browser-profile decision to be
-revisited before screen capture ships** — I'll bring that to you before writing
-it, not after.
-
 ## 4.11 — Confirm the suite
 
 ```powershell
@@ -876,4 +869,177 @@ python -m pytest
 
 ---
 
-<!-- Stage 4 part 2 is added here when close-before-force lands. -->
+# Stage 4, part 2 — the Edge bug, capture, and "what's on my screen"
+
+Added 2026-08-06 after your Notepad/Edge round.
+
+## 4.12 — The false "closed" you caught ⭐ **start here**
+
+You said:
+
+> notepad closes on single click even when something is drafted and not saved,
+> that's not an issue, it closed after i allowed 2 prompts. but then i played a
+> music tab in ms edge, which if i click x, it asks a confirmation whether i
+> want to leave or not before closing. **jarvis falsely reported completed, ms
+> edge was not closed.**
+
+That was a real bug and the worst kind this project can have: `verified` — the
+word that is supposed to mean *checked* — attached to something untrue.
+
+**What was wrong.** `app.close` decided whether the window had closed by asking
+whether it was still in the window list. But that list is not a list of windows
+that *exist* — it is the list of windows **a person would call open**, and it
+deliberately drops the invisible, the untitled and the DWM-cloaked ones. That
+filter is exactly what turned your listing of eleven windows into the four you
+actually had, back in §4.4.
+
+Chromium answers a close request by **hiding its window** while it asks you
+whether to leave the page. So Edge fell out of that list while being entirely
+alive — and "not in the list" was being read as "closed". Notepad worked because
+Notepad genuinely destroys its window.
+
+I reproduced it before changing anything, with Character Map standing in for
+Edge:
+
+```
+Jarvis reports : outcome=closed verified=True
+the window     : exists=True visible=False
+dropped from the list because: not visible
+```
+
+**What it does now.** Closing asks Windows whether the handle is still a window
+at all, which is a different question from whether it is still on screen. Same
+lab, after the fix:
+
+```
+Jarvis reports : outcome=still_running verified=False
+charmap.exe has not closed — it is still running and its window has gone off
+screen, which usually means it is asking you to confirm.
+```
+
+**Please retry your exact case:** play something in Edge so that clicking X
+prompts you, then ask Jarvis to close Edge.
+
+**You should hear:** that Edge has **not** closed and is asking you something —
+never "closed". Answer the prompt yourself; Jarvis will not touch it and will
+not force it.
+
+**Tell me:** if it ever says closed while Edge is still there. Also tell me if
+you get the opposite — "has not closed" about something that plainly *did* close
+— which would be the check wrong in the other direction.
+
+> One thing I could not test for you: Chromium draws that "leave site?" prompt
+> **inside** the page rather than as a separate window, so there is nothing for
+> Jarvis to see from the outside. That is why the message says "it may be asking
+> you" rather than claiming a prompt exists. I would rather it said the vaguer
+> true thing than the specific false one.
+
+## 4.13 — Screen capture (P2-WIN-10) 🆕
+
+Whole-screen capture, which is what you chose when I asked. Two things to check.
+
+**Ask Jarvis to take a screenshot.**
+
+**You should see:**
+
+1. A notification that a capture is happening — *before* the picture is taken,
+   not after.
+2. A `.bmp` file in `captures/` inside your Jarvis data folder.
+
+**What is deliberate here:**
+
+- **The picture is ~15 MB.** It is an uncompressed BMP. Pillow is not installed,
+  and a hand-rolled PNG encoder is the kind of thing that is subtly wrong in a
+  way nothing here could catch. Only the newest 20 captures are kept.
+- **Jarvis cannot choose where the file goes.** The path is composed inside the
+  vault from a timestamp. A capture tool that accepted a path would be a
+  file-write primitive wearing a camera's name.
+- **If the notification cannot be shown, there is no capture tool at all** — not
+  a tool that captures quietly. Running headless, `screen.capture` is simply not
+  registered.
+
+**Tell me:** if a capture ever happens with no visible notice. That is the one
+outcome the whole design exists to prevent.
+
+### If you use a password manager or banking app (you said you don't)
+
+Blocklisted windows are filled **black** in the image before it is written, so
+those pixels never reach the file. I verified that against your real screen —
+2560×1440 captured, redacted rectangle black *in the file*, everything around it
+intact. Worth knowing it is there even though you won't exercise it.
+
+## 4.14 — "What's on my screen" (P2-WIN-11) 🆕
+
+**Ask:** *"Jarvis, what's on my screen?"*
+
+**You should hear:** which application is in front — and, plainly, that Jarvis
+**cannot read what is inside it**.
+
+That second half is the point. Reading pixels needs a vision model, which is
+Phase 4. Jarvis knows which window has focus because it asked Windows; it does
+not know what the window says. Answering "what's on my screen" with a confident
+description assembled from the window's title would be inventing — and the title
+is written by the application, which is the one thing this phase never treats as
+a statement of fact.
+
+It also gives you *"close this"* and *"move this to the left"* about whatever you
+are looking at, without listing first.
+
+**Tell me:** if it ever describes screen *contents*. That would mean it is
+making things up.
+
+## 4.15 — Your TTS log question, answered
+
+You asked about these lines:
+
+```
+HTTP Request: HEAD https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/voices/bm_george.pt
+Warning: You are sending unauthenticated requests to the HF Hub.
+```
+
+**Why you saw it.** Kokoro loads its voice files through `huggingface_hub`, and
+that library revalidates against the Hub — it asks "is the copy on disk still
+current?" — even when the file is already downloaded. Kokoro resolves voices at
+*synthesis* time, so that check landed on the path of **every spoken reply**.
+
+**Yes, the same applies to speech-to-text.** faster-whisper uses the same
+library, so it does the same thing — once, when the model loads, which is why it
+is quieter in the log rather than absent. Your wake word was already fully local
+and is unaffected.
+
+**What changed.** Two separate problems, two fixes:
+
+- **Storage.** `storage.huggingface_home` has named a folder inside your Jarvis
+  data directory since Phase 1 and **nothing ever read it**. Your models are in
+  the right place only because you exported `HF_HOME` by hand. It is applied now
+  — and if you have set `HF_HOME` yourself, yours still wins; I am not moving
+  gigabytes of downloads behind your back.
+- **Network.** Local-only is now the default in **every** network mode, not just
+  offline mode. The network is for downloading a model that is missing, never
+  for confirming one you already have.
+
+> I also found the old control was partly ineffective: `huggingface_hub` reads
+> that switch **when it is imported**, not when a model loads, so setting it
+> afterwards changed nothing. The test only checked that the environment
+> variable was set — which it always was. It now checks what the library
+> actually believes, and the library is told directly.
+
+**What you should see:** no more `huggingface.co` lines when Jarvis speaks.
+Nothing else should change.
+
+**Tell me:** if the voice stops working. That would mean a model is not where
+this expects it, and the fix is one setting: `storage.speech_models_local_only`.
+
+## 4.16 — Confirm the suite
+
+```powershell
+python -m pytest
+```
+
+**You should see:** `1279 passed, 2 skipped`, exit code 0.
+
+## Still to come
+
+Not built, so don't test for them: reading screen *contents* (vision, Phase 4),
+and the full capture-scope hierarchy with a real retention policy — right now
+the only guarantee is that the folder keeps the newest 20 captures.

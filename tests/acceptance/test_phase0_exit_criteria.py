@@ -274,6 +274,12 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # itself.
         "window.list",
         "window.arrange",
+        # Phase 2 stage 4 (P2-WIN-11, FR-270 in part). "What's on my screen"
+        # answered honestly: it names the window in front and says plainly that
+        # Jarvis cannot read what is inside it, because reading pixels needs the
+        # vision support that is Phase 4. Low risk and holds no lock — it asks
+        # the OS which window has focus and changes nothing.
+        "screen.active_window",
         # Phase 2 stage 4 (P2-APP-01, P2-APP-02). Two tools, and the split is
         # the whole control: `app.close` asks, the way clicking the X asks, and
         # stops when the application raises a save prompt. `app.force_close`
@@ -310,6 +316,34 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
             "high-risk or prohibited tool beyond "
             f"{sorted(high_risk_by_design)}"
         )
+
+
+def test_exit_6_the_shell_backed_tools_appear_only_with_a_shell(
+    core: JarvisCore,
+) -> None:
+    """Two tools exist only when something can show the user what happened.
+
+    `notify.show` has nothing to draw on without a shell. `screen.capture` is
+    the stronger case: Jarvis does not photograph the screen without showing
+    that it is happening (FR-271), so with no indicator there is no capture tool
+    at all — not one that registers and then refuses every call.
+
+    Asserted here, at the level of the assembled application, because the whole
+    point of the arrangement is what the *running product* offers. A capture
+    core with perfect controls that nothing can reach is the failure this phase
+    has already made four times.
+    """
+    assert core.registry.get("screen.capture") is None, (
+        "screen.capture exists with nothing able to show a capture indicator"
+    )
+
+    registered = core.attach_shell(
+        lambda _title, _message: True, lambda _message: None
+    )
+
+    assert "notify.show" in registered
+    assert "screen.capture" in registered
+    assert core.registry.get("screen.capture") is not None
 
 
 def test_exit_6_a_state_changing_tool_must_declare_how_it_verifies(

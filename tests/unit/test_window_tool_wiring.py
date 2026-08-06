@@ -21,6 +21,8 @@ import pytest
 
 from jarvis.core.tools.contract import ToolContext, ToolFailure
 from jarvis.toolbox.phase2_window_tools import (
+    ScreenContextInput,
+    ScreenContextTool,
     WindowArrangeAction,
     WindowArrangeInput,
     WindowArrangeTool,
@@ -78,7 +80,78 @@ def _window(**overrides):
 # The seam in the running application
 # =========================================================================
 def test_the_core_registers_the_window_tools(core) -> None:
-    assert {"window.list", "window.arrange"} <= set(core.registry.tool_ids())
+    assert {
+        "window.list",
+        "window.arrange",
+        "screen.active_window",
+    } <= set(core.registry.tool_ids())
+
+
+# =========================================================================
+# What the user is looking at (P2-WIN-11, FR-270 in part)
+# =========================================================================
+class ForegroundBackend(FakeBackend):
+    def __init__(self, windows, foreground=0):
+        super().__init__(windows)
+        self._foreground = foreground
+
+    def foreground_handle(self):
+        return self._foreground
+
+
+def _context(windows, foreground):
+    discovery = WindowDiscovery(
+        backend=ForegroundBackend(windows, foreground), sensitive=SensitiveTargets()
+    )
+    tool = ScreenContextTool(discovery)
+    return tool.run(ToolContext(), ScreenContextInput())
+
+
+def test_it_names_the_window_the_user_is_actually_looking_at() -> None:
+    result = _context(
+        [_window(handle=1001), _window(handle=2002, process_name="notepad.exe")],
+        foreground=2002,
+    )
+
+    assert result.output.application == "notepad"
+    assert result.output.window, "no reference was returned, so 'close this' cannot work"
+
+
+def test_it_says_it_cannot_read_the_screen_rather_than_implying_it_can() -> None:
+    """ADR-0010: name what is not possible.
+
+    "What's on my screen" is a question about contents, and Jarvis has no vision
+    model — that is Phase 4. Answering with a description assembled from the
+    window title would be inventing, and the title is application-authored text
+    besides. So the tool names the window and says plainly what it cannot do.
+    """
+    result = _context([_window(handle=1001)], foreground=1001)
+
+    assert "cannot read" in result.output.detail.lower()
+
+
+def test_nothing_identifiable_is_a_real_answer_not_a_guess() -> None:
+    """The foreground may be the desktop, or a window the listing filters out.
+
+    Naming whatever happened to be first would be the positional bug again,
+    wearing different clothes.
+    """
+    result = _context([_window(handle=1001)], foreground=9999)
+
+    assert result.output.application == ""
+    assert "nothing identifiable" in result.output.detail.lower()
+
+
+def test_a_sensitive_window_in_front_is_named_but_not_described() -> None:
+    """The blocklist is the same one the listing and the actions use."""
+    result = _context(
+        [_window(handle=1001, process_name="1Password.exe", title="Vault")],
+        foreground=1001,
+    )
+
+    assert result.output.sensitive is True
+    assert "Vault" not in result.output.title
+    assert SENSITIVE_TITLE_REDACTION == result.output.title
 
 
 def test_the_core_gives_the_tools_something_that_can_actually_act(core) -> None:

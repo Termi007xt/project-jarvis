@@ -11,6 +11,22 @@ has shipped yet.
 
 ### Added
 
+- **Jarvis can photograph the screen, visibly** (`screen.capture`, FR-073,
+  FR-271, FR-272). You are always shown that a capture is happening, and the
+  notice is raised before the picture is taken rather than after. If nothing can
+  show that notice, the tool does not exist at all — not a tool that captures
+  quietly. Windows belonging to applications on the sensitive list are filled
+  black before anything reaches disk, because the blocklist guards *automation*
+  and cannot guard a camera pointed at the whole screen. Jarvis never chooses
+  where the file goes: the path is composed inside the vault, so the tool cannot
+  become a way to write a file anywhere else. Only the newest 20 captures are
+  kept.
+- **Jarvis can say what you are looking at** (`screen.active_window`, FR-270 in
+  part). Which application is in front, and a reference so "close this" and
+  "move this to the left" work without listing first. It states plainly that it
+  **cannot read the contents** of the screen — that needs vision support planned
+  for Phase 4, and a description assembled from a window title would be
+  invention dressed as observation.
 - **Jarvis can see and arrange your windows** (`window.list`, `window.arrange`,
   FR-240 … FR-243). Bring a window forward, minimise, maximise, restore, snap to
   a half, or move it exactly. Two tools rather than one, because reading which
@@ -75,6 +91,35 @@ has shipped yet.
 
 ### Fixed
 
+- **Closing an application could report success while it was still open.**
+  Closing Microsoft Edge with a tab that asks before leaving said *"Microsoft
+  Edge has been closed"* — verified — with Edge still on screen. The check asked
+  whether the window was still in the window list, but that list answers *would
+  a person call this open*, and deliberately leaves out the invisible, the
+  untitled and the cloaked; Chromium hides its window while it asks you to
+  confirm, so it left the list while entirely alive. Closing now asks Windows
+  whether the window still exists, which is a different question from whether it
+  is still on screen. A window that exists but has gone off screen is reported
+  as still running and possibly asking you something — never as closed, and
+  never as "still open with nothing asking", because Chromium draws that prompt
+  inside the page where nothing outside can see it.
+- **Speech models reached the network on every spoken reply.** Kokoro loads its
+  voice files through `huggingface_hub`, which revalidates cached files against
+  the Hub, and it resolves voices at synthesis time — so a fully downloaded,
+  local voice still produced a request to huggingface.co each time Jarvis spoke.
+  Speech-to-text did the same once per load. Loading weights from disk alone is
+  now the default in every network mode (`storage.speech_models_local_only`);
+  the network is for downloading a model that is missing, never for confirming
+  one already present.
+- **The model store setting had never been applied.** `storage.huggingface_home`
+  has named a directory inside the Jarvis data folder since Phase 1 and nothing
+  read it, so the speech libraries used their own cache under the user profile.
+  It is applied now. An `HF_HOME` you set yourself still wins.
+- **The offline switch for speech models was read too late to work.**
+  `huggingface_hub` captures it when the library is imported rather than when a
+  model loads, so applying it afterwards changed nothing — and the test asserted
+  only that the environment variable was set, which it always was. The library
+  is now told directly, and the test checks what the library believes.
 - **"Bring this window to the front" reported success without checking.** It
   confirmed only that the window was no longer minimised — which it usually was
   not — while Windows routinely refuses `SetForegroundWindow` from a process
