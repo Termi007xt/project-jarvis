@@ -1096,13 +1096,49 @@ tool.
 > the first ask, that is a prompt-and-model problem, and worth telling me — the
 > tool descriptions are the next lever.
 
+## 4.18 — The second escape, from your retry
+
+Your retry round went: `app.close` ran and reported the dialog honestly ✓ — then
+*"I see MS Edge (window reference: win-2a1c92ab) was closed successfully"* with
+only a listing behind it ✗ — then a correct close on the third ask ✓.
+
+The audit confirms the first fix was working: `window.list` now records
+`not_applicable`, so it no longer licenses a success claim. The claim got
+through on **phrasing**. The detector knew "has been closed" and "is now
+closed", and not "was closed"; it knew "successfully closed", and not "closed
+successfully". The same sentence, two spellings, one hedged and one not.
+
+Both are covered now. Deliberately still not covered: the bare present state,
+*"MS Edge is closed"* — that is what a listing legitimately reports, and hedging
+the answer to "what's open?" would teach you to skip the hedge, which is how a
+warning stops working.
+
+**Honest about the limit:** this is a list of phrases, and a list of phrases has
+a next gap. It is a backstop for when the model misbehaves, not the reason it
+behaves. If you see another one, send me the sentence verbatim — that is the
+useful thing, and it is how both of these were found.
+
+## 4.19 — Your suite noticed two things
+
+**It talked.** Three UI tests simulated a *spoken* command, which is answered
+aloud by design, and asserted on something else entirely — so they ran through
+Kokoro to your sound card. That is also much of the 17GB: loading Kokoro pulls
+in torch. No UI test opens the speakers now.
+
+**One test is flaky, and it is not one of mine.**
+`test_the_task_state_machine_is_persistent` failed once in a full run and passed
+in isolation and on the next two full runs. It reopens a core whose scheduler
+can dispatch the queued task before the assertion reads it — a race in the test,
+not in the product. Recorded rather than quietly re-run until green; if you see
+it, that is the one.
+
 ## 4.16 — Confirm the suite
 
 ```powershell
 python -m pytest
 ```
 
-**You should see:** `1285 passed, 2 skipped`, exit code 0.
+**You should see:** `1288 passed, 2 skipped`, exit code 0, and **silence**.
 
 ## Still to come
 

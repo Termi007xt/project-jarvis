@@ -57,15 +57,37 @@ class SourceLabel(str, Enum):
 #: Phrases that assert an action was completed. Deliberately conservative: a
 #: false positive costs a hedged sentence, a false negative lets Jarvis claim a
 #: success it never verified.
+#: Things an action leaves behind. Shared by the perfect and simple-past forms
+#: below, because "has been closed" and "was closed" are the same claim.
+_DONE_TO_IT = (
+    "opened|launched|started|closed|sent|deleted|created|saved|played|"
+    "moved|resized|minimised|minimized|maximised|maximized|captured|arranged"
+)
+
 SUCCESS_PHRASES: tuple[str, ...] = (
     r"\bi(?:'ve| have)? (?:opened|launched|started|closed|sent|deleted|created|saved|played)\b",
     r"\bis now (?:open|running|playing|closed|paused|muted)\b",
-    r"\bhas been (?:opened|launched|started|closed|sent|deleted|created|saved)\b",
+    rf"\bhas been (?:{_DONE_TO_IT})\b",
+    # The simple past passive, added 2026-08-06 after it reached the owner
+    # twice. "I see MS Edge was closed successfully" is the same assertion as
+    # "MS Edge has been closed", and only the second was being caught — two
+    # spellings of one sentence, one hedged and one not. It is also the most
+    # ordinary way in English to say a thing was done, so it was never an edge
+    # case; it was the main case, missed.
+    #
+    # Deliberately *not* here: the bare present state, "MS Edge is closed".
+    # That is what a listing legitimately reports, and hedging Jarvis's answer
+    # to "what's open?" would make the reading tools useless and teach the owner
+    # to skip the hedge — which is how a warning stops working.
+    rf"\b(?:was|were) (?:{_DONE_TO_IT})\b",
     # "Done." as a whole statement, not the word "done" inside a sentence such
     # as "the wrong thing to have done". Anchored to a sentence boundary, since
     # the bare word is far too common to treat as a completion claim.
     r"(?:^|[.!?]\s+|\n)(?:done|all set|that'?s done|completed successfully)\b[.!\s]*$",
+    # Both orders. `successfully closed` was covered and `closed successfully`
+    # was not, which is the other half of the same escape.
     r"\bsuccessfully \w+ed\b",
+    r"\b\w+ed successfully\b",
 )
 
 _SUCCESS_PATTERN = re.compile("|".join(SUCCESS_PHRASES), re.IGNORECASE | re.MULTILINE)

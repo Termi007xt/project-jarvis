@@ -91,6 +91,19 @@ has shipped yet.
 
 ### Fixed
 
+- **"It was closed successfully" was not recognised as a claim that anything
+  had been closed.** The check knew *"has been closed"* and *"is now closed"*
+  and not the plain past passive, and knew *"successfully closed"* but not
+  *"closed successfully"* — so the same sentence was hedged or waved through
+  depending on how the model happened to phrase it. Both spellings are covered
+  now. The bare present state, "MS Edge is closed", deliberately still is not:
+  that is what a window listing legitimately reports, and hedging the answer to
+  "what's open?" would teach the reader to skip the hedge.
+- **The test suite spoke out loud and loaded the speech models to do it.** Three
+  UI tests simulated a spoken command, which is answered aloud by design, and
+  asserted on something else — so they ran all the way through Kokoro to the
+  sound card, pulling torch into memory with it. No UI test opens the speakers
+  now, enforced once for all of them rather than fixture by fixture.
 - **A reply could claim an action was done on the strength of an unrelated
   listing.** Asked to close Microsoft Edge, Jarvis called `window.list`, saw
   Edge in the results, and answered "The MS Edge window has been closed

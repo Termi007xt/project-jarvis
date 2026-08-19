@@ -162,6 +162,65 @@ def test_listing_windows_does_not_license_claiming_a_close() -> None:
     )
 
 
+def test_the_past_passive_is_a_completion_claim_too() -> None:
+    """The second escape, 2026-08-06 evening, verbatim.
+
+    With the read-only fix in place the owner asked again, and this reached them
+    unchallenged:
+
+        "I see MS Edge (window reference: win-2a1c92ab) was closed successfully.
+         There are now 3 windows open..."
+
+    The audit shows `window.list` alone in that turn. So the licence was gone and
+    the claim still got through, because the detector knew *"has been closed"*
+    and *"is now closed"* and not *"was closed"* — and knew `successfully closed`
+    but not `closed successfully`. Two spellings of the same sentence, one
+    caught and one not.
+
+    A closed list of phrases will always have a next gap; that is the nature of
+    it. What makes this one worth closing rather than shrugging at is that the
+    simple past passive is the most ordinary way in English to say a thing was
+    done, so it was never an edge case.
+    """
+    review = review_response(
+        "I see MS Edge (window reference: win-2a1c92ab) was closed successfully. "
+        "There are now 3 windows open: Antigravity IDE, Brave and Project Jarvis.",
+        tool_results=(_Result(Verification.NOT_APPLICABLE),),
+    )
+
+    assert review.amended, "'was closed successfully' passed as a listing"
+    assert not review.verified_by_tool
+
+
+def test_a_listing_that_merely_mentions_state_is_not_hedged() -> None:
+    """The control, and the reason this widening is not simply "match more".
+
+    Describing what is open is the honest use of a listing and the thing
+    `window.list` is *for*. Hedging it would make the tool useless and teach the
+    owner to read the hedge as noise, which is how a warning stops working.
+    """
+    for reply in (
+        "You have three windows open: Antigravity IDE, Brave and Project Jarvis.",
+        "MS Edge is not running at the moment.",
+        "Nothing is open except File Explorer.",
+    ):
+        review = review_response(
+            reply, tool_results=(_Result(Verification.NOT_APPLICABLE),)
+        )
+        assert not review.amended, f"an ordinary listing was hedged: {reply!r}"
+
+
+def test_a_verified_close_may_still_be_reported_in_the_past_passive() -> None:
+    """Widening the detector must not cost the true statement."""
+    review = review_response(
+        "MS Edge was closed successfully.",
+        tool_results=(_Result(Verification.VERIFIED, tool_id="app.close"),),
+    )
+
+    assert not review.amended
+    assert review.verified_by_tool
+
+
 def test_a_read_only_result_is_still_labelled_as_coming_from_a_tool() -> None:
     """The other half, which must not be broken while fixing the first.
 
