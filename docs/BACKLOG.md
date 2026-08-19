@@ -452,26 +452,26 @@ and recovery exist to back them.
 | ID | Item | PRD refs | Depends on | Size | Status |
 |----|------|----------|------------|------|--------|
 | P2-WIN-01 | Application catalogue: scan safe registries/Start menu, present for approval; manual mapping GUI | FR-060, FR-061, FR-062, FR-063 | P1-APP-01 | L | Not started |
-| P2-WIN-02 | UI Automation inspector: accessible name, control type, automation ID, patterns | FR-071 | P0-COR-04 | L | Not started |
-| P2-WIN-03 | Automation worker thread; pywinauto UIA backend integration | §12.2 | P0-COR-06 | XL | Not started |
-| P2-WIN-04 | Input ownership: acquire `foreground_desktop` lock before mouse/keyboard | FR-077 | P2-WIN-03, P0-TSK-03 | M | Not started |
-| P2-WIN-05 | User-interruption pause: mouse/keyboard activity pauses the task | FR-078, AT-008 | P2-WIN-04 | M | Not started |
-| P2-WIN-06 | Secure-desktop and UAC-prompt avoidance; password-field avoidance | FR-079, FR-080 | P2-WIN-03 | M | Not started |
-| P2-WIN-07 | Sensitive-application blocklist for automation and screenshot capture | FR-081, AT-031 | P2-WIN-03 | M | Not started |
-| P2-WIN-08 | Window discovery: process, identity, title, UIA properties, monitor, state | FR-240 | P2-WIN-02 | M | Not started |
-| P2-WIN-09 | Window actions: activate, minimise, maximise, restore, move, resize, snap, monitor placement | FR-241, FR-242, FR-243 | P2-WIN-08 | L | Not started |
-| P2-WIN-10 | Screenshot capture scoped to window/monitor/region; visible capture indication | FR-073, FR-271, FR-272 | P2-WIN-03 | M | Not started |
-| P2-WIN-11 | Active-window screen-context request (basic "what's on my screen") | FR-270 (partial) | P2-WIN-10, P1-LLM-01 | M | Not started |
-| P2-APP-01 | Normal close before force; unsaved-work-dialog detection and pause | FR-065, FR-066, AT-004 | P2-WIN-02 | M | Not started |
-| P2-APP-02 | Force-close: explicit confirmation required every time | FR-067, AT-005 | P2-APP-01 | S | Not started |
-| P2-BRW-01 | Dedicated persistent "Jarvis" Brave automation profile | FR-056 | P1-BRW-01 | M | Not started |
-| P2-BRW-02 | Playwright visible-browser integration; DOM-first execution | FR-072, §12.1 | P2-BRW-01 | XL | Not started |
+| P2-WIN-02 | UI Automation inspector: accessible name, control type, automation ID, patterns | FR-071 | P0-COR-04 | L | Partial — inspector exists; not yet a tool |
+| P2-WIN-03 | Automation worker thread; pywinauto UIA backend integration | §12.2 | P0-COR-06 | XL | Partial — worker thread and UIA backend exist |
+| P2-WIN-04 | Input ownership: acquire `foreground_desktop` lock before mouse/keyboard | FR-077 | P2-WIN-03, P0-TSK-03 | M | Done |
+| P2-WIN-05 | User-interruption pause: mouse/keyboard activity pauses the task | FR-078, AT-008 | P2-WIN-04 | M | Done |
+| P2-WIN-06 | Secure-desktop and UAC-prompt avoidance; password-field avoidance | FR-079, FR-080 | P2-WIN-03 | M | Done |
+| P2-WIN-07 | Sensitive-application blocklist for automation and screenshot capture | FR-081, AT-031 | P2-WIN-03 | M | Done |
+| P2-WIN-08 | Window discovery: process, identity, title, UIA properties, monitor, state | FR-240 | P2-WIN-02 | M | Done |
+| P2-WIN-09 | Window actions: activate, minimise, maximise, restore, move, resize, snap, monitor placement | FR-241, FR-242, FR-243 | P2-WIN-08 | L | Done |
+| P2-WIN-10 | Screenshot capture scoped to window/monitor/region; visible capture indication | FR-073, FR-271, FR-272 | P2-WIN-03 | M | Done |
+| P2-WIN-11 | Active-window screen-context request (basic "what's on my screen") | FR-270 (partial) | P2-WIN-10, P1-LLM-01 | M | Done |
+| P2-APP-01 | Normal close before force; unsaved-work-dialog detection and pause | FR-065, FR-066, AT-004 | P2-WIN-02 | M | Done |
+| P2-APP-02 | Force-close: explicit confirmation required every time | FR-067, AT-005 | P2-APP-01 | S | Done |
+| P2-BRW-01 | Dedicated persistent "Jarvis" Brave automation profile | FR-056 | P1-BRW-01 | M | Done |
+| P2-BRW-02 | Playwright visible-browser integration; DOM-first execution | FR-072, §12.1 | P2-BRW-01 | XL | Done |
 | P2-BRW-03 | Browser session control: clear profile, cookies, site permissions | FR-057 | P2-BRW-01 | S | Not started |
-| P2-BRW-04 | CAPTCHA / anti-bot pause-and-request-user | FR-058 | P2-BRW-02 | M | Not started |
+| P2-BRW-04 | CAPTCHA / anti-bot pause-and-request-user | FR-058 | P2-BRW-02 | M | Partial — CAPTCHA pause exists |
 | P2-BRW-05 | Internet research: search modes, explicit network indicator, sourced summaries | FR-050, FR-051, FR-053 | P2-BRW-02 | L | Not started |
-| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Not started |
+| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Partial — untrusted wrapping done; adversarial suite pending |
 | P2-BRW-07 | AI website prompting adapter (Gemini/ChatGPT-class sites) | FR-055 | P2-BRW-01 | M | Not started |
-| P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Not started |
+| P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Done |
 | P2-BRW-09 | YouTube Music search; ambiguous-match clarifying question | FR-092, FR-093 | P2-BRW-08 | M | Not started |
 | P2-FS-01 | Windows Known Folder resolution via Windows APIs | FR-190, AT-019 | P0-COR-04 | S | Not started |
 | P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Not started |
