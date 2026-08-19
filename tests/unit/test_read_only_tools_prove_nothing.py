@@ -270,7 +270,7 @@ def test_a_real_close_still_supports_saying_it_closed() -> None:
     is supposed to rest on."""
     review = review_response(
         "The MS Edge window has been closed successfully.",
-        tool_results=(_Result(Verification.VERIFIED),),
+        tool_results=(_Result(Verification.VERIFIED, tool_id="app.close"),),
     )
 
     assert not review.amended

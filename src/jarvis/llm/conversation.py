@@ -21,6 +21,7 @@ fabrication FR-047 exists to prevent.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -51,7 +52,22 @@ _LOG = logging.getLogger(__name__)
 #: the model finally answers, which only fits if it batches both arranges into
 #: one round — and it does not reliably. A single-window arrange hit the limit
 #: in real use and was reported as a failure after it had already worked.
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 12
+
+#: How many times a turn may push back on itself before giving up (ADR-0033).
+#:
+#: The owner asked for a turn that keeps working until the job is done — "unless
+#: for sure task not done, dont stop working". This is the shape that honours
+#: that without becoming a hang: the turn carries on while it is making a claim
+#: nothing backs, and stops when it runs out of pushes.
+#:
+#: Three, because the failure it exists for is a model that announces an action
+#: instead of taking it, and a model that has been told three times in plain
+#: terms that nothing has happened is not one round away from noticing. Past
+#: that, the honest outcome is to say it could not, which is what the grounding
+#: review then makes the reply say. A loop that only exits on success is a hang
+#: wearing a helpful expression, and PRD FR-123 forbids it besides.
+MAX_FOLLOW_UPS = 3
 
 BASE_SYSTEM_PROMPT = """\
 You are Jarvis, a local-first assistant running on the user's own Windows computer.
@@ -105,6 +121,7 @@ class ConversationEngine:
         registry: Any | None = None,
         max_context_messages: int = 24,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
+        max_follow_ups: int = MAX_FOLLOW_UPS,
         session_id: str | None = None,
         user_name: str = "",
     ) -> None:
@@ -116,6 +133,7 @@ class ConversationEngine:
         self._registry = registry
         self._max_context_messages = max_context_messages
         self._max_tool_rounds = max_tool_rounds
+        self._max_follow_ups = max_follow_ups
         self._session_id = session_id
 
     @property
@@ -167,6 +185,7 @@ class ConversationEngine:
         proposals: list[ToolCallProposal] = []
         refused: list[str] = []
         response: ChatResponse | None = None
+        follow_ups = 0
 
         for round_number in range(1, self._max_tool_rounds + 1):
             turn.rounds = round_number
@@ -177,6 +196,27 @@ class ConversationEngine:
                 return turn
 
             if not response.proposes_action:
+                # The model has stopped calling tools. That is only the end of
+                # the turn if the work is actually finished.
+                #
+                # Reported 2026-08-06: "close MS edge" was answered with "I'll
+                # close it for you", and the turn ended there — a model that
+                # announced an intention got exactly what a model that finished
+                # the work got. Asked directly afterwards, it looked and said
+                # the window was still open, so it had the information and
+                # simply had no reason to act on it.
+                unfinished = _unfinished_business(response.text or "", results)
+                if unfinished and follow_ups < self._max_follow_ups:
+                    follow_ups += 1
+                    messages.append(
+                        ChatMessage(
+                            role=ChatRole.ASSISTANT, content=response.text or ""
+                        )
+                    )
+                    messages.append(
+                        ChatMessage(role=ChatRole.SYSTEM, content=unfinished)
+                    )
+                    continue
                 break
 
             proposals.extend(response.tool_calls)
@@ -366,6 +406,98 @@ def _describe_silence(results: tuple[Any, ...]) -> str:
     return (
         "The model returned an empty reply. Nothing was done and I have nothing "
         "to report — please ask again, or rephrase it."
+    )
+
+
+#: Replies that read as "the job is done", used only to decide whether to keep
+#: working. Wider and blunter than anything in `jarvis.llm.grounding`, because a
+#: false positive here costs one extra model call and a false negative ends a
+#: turn on a job that was never done.
+_SOUNDS_FINISHED = re.compile(
+    r"\b(?:is|are|was|were|has been|have been)\s+(?:now\s+)?"
+    r"(?:closed|open|opened|running|playing|paused|muted|moved|resized|"
+    r"minimi[sz]ed|maximi[sz]ed|snapped|captured|saved|sent|deleted|created)\b"
+    r"|(?:^|[.!?]\s+|\n)\s*(?:done|all set|all done)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _unfinished_business(text: str, results: list[Any]) -> str | None:
+    """Why this turn is not over yet, said to the model. None means it is over.
+
+    Three shapes end a turn dishonestly, and they are one situation: the reply
+    describes an action that nothing performed.
+
+    * **A promise.** *"I'll close it for you"* — true when said, false once the
+      turn ends. The model already knew how; it simply had no reason to carry
+      on, because stopping was allowed.
+    * **A completion claim nothing backs.** *"Done, Sir"* with no tool behind it.
+    * **A claim about the wrong action.** *"YouTube Music is now open and
+      playing"* with a verified `app.open` and nothing that can play anything.
+      This is why the check is per-claim rather than "did any tool verify
+      something" — one had.
+
+    The answer to all three is the same and it is not a rewrite: give the model
+    the facts and let it finish. Rewriting produces an honest account of a job
+    that did not get done, which is better than a dishonest one and worse than
+    doing the job.
+
+    Deliberately says nothing about *which* tool to call. Naming one here would
+    put the engine in the business of planning, and the model can already see
+    the catalogue.
+    """
+    from jarvis.llm.grounding import (
+        claims_completion,
+        promises_action,
+        unbacked_claims,
+    )
+
+    verified = tuple(
+        result
+        for result in results
+        if getattr(result, "succeeded", False)
+        and getattr(getattr(result, "verification", None), "value", "") == "verified"
+    )
+    unbacked = unbacked_claims(text, tuple(results))
+    promised = promises_action(text)
+    # Deliberately a wider net than the one `review_response` rewrites with.
+    # The two decisions have opposite costs: pushing back on a turn that was
+    # actually finished costs one model call and an "it is already done", while
+    # rewriting a true sentence tells the owner something false. So this is
+    # eager and the rewrite stays conservative.
+    #
+    # It is what catches "Done, Sir. The Microsoft Edge window is closed and
+    # verified." — no tool had run at all, and none of the narrower patterns
+    # match a bare "is closed", because that is also how a window listing
+    # legitimately reports state.
+    claimed_without_any_tool = (
+        claims_completion(text) or _SOUNDS_FINISHED.search(text or "") is not None
+    ) and not verified
+
+    if not (unbacked or promised or claimed_without_any_tool):
+        return None
+
+    if promised and not unbacked and not claimed_without_any_tool:
+        reason = (
+            "You said you would do it. Nothing has done it — saying so is not "
+            "doing it, and this turn ends after your next message."
+        )
+    elif unbacked:
+        reason = (
+            f"You described this as done: {', '.join(unbacked)}. No tool that "
+            "could have done it has run and confirmed it, so as far as the "
+            "computer is concerned it has not happened."
+        )
+    else:
+        reason = (
+            "You described an action as done and no tool confirmed anything."
+        )
+
+    return (
+        f"{reason} Call the tool that performs it now. If you cannot — because "
+        "there is no such tool, or because it failed, or because the user has "
+        "not permitted it — say that plainly instead, and say why. Do not "
+        "answer with another intention."
     )
 
 

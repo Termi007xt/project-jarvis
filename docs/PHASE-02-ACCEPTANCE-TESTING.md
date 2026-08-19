@@ -1132,13 +1132,70 @@ can dispatch the queued task before the assertion reads it — a race in the tes
 not in the product. Recorded rather than quietly re-run until green; if you see
 it, that is the one.
 
+## 4.20 — The turn keeps working now ⭐ **the big one**
+
+Three of your reports were one problem, and your read of it was right.
+
+```
+Sir: close MS edge
+Jarvis: I'll close it for you.        <- and the turn ended
+Sir: did you close it?
+Jarvis: Nope, it's still there.       <- correct, and it could see that
+```
+
+The second exchange is what settled the design. **It knew.** Asked directly, it
+looked and told you the truth. It had the tool, it had the information, and the
+system prompt already told it not to claim things it had not done. What it did
+not have was any reason to keep going — the turn ended the moment it produced
+words instead of a tool call, so announcing an intention got exactly the same
+treatment as finishing the job.
+
+**A turn now continues while its own reply describes work nothing did.** Three
+shapes keep it going:
+
+- a promise — *"I'll close it for you"*;
+- *"Done, Sir"* with no tool behind it;
+- a claim about a **different** action than the one performed.
+
+That third one is your YouTube Music case, and it is the sharpest. `app.open`
+really did run and really was verified — so "did any tool verify something?"
+answered yes, and carried *"and playing the current song"* along with it. Nothing
+that can play anything had run. Claims are now checked against the tools that
+could have produced them.
+
+**What to test:**
+
+1. *"Close MS Edge"* — once. It should close it in that turn, without you asking
+   twice. Expect the approval prompt.
+2. *"Open YouTube Music and play whatever song is in the queue"* — the song
+   should actually play. Note it needs `media.control`, so expect a second
+   approval prompt.
+3. Something it genuinely cannot do, to check it still stops: it should say so
+   plainly after a few attempts rather than looping.
+
+**What is deliberately still true:**
+
+- **It is bounded** — 12 tool rounds, 3 follow-ups. You asked for it to keep
+  working, not to keep going; a loop that only exits on success is a hang.
+- **Every retry is still fully permissioned.** Continuing produces tool
+  *proposals*, and each one goes through the same six checks. A turn that
+  carries on cannot do anything a first-round call could not, and it will ask
+  you again.
+- **This cannot make the model competent.** It stops a turn ending on an unkept
+  promise. If the model still picks the wrong tool, it will now say so after
+  three attempts instead of one — a better failure, not a success.
+
+**Tell me:** if it ever loops visibly, asks for the same approval repeatedly, or
+gives up on something it should have managed. Those are the three ways this
+change can go wrong, and they are all worth knowing about immediately.
+
 ## 4.16 — Confirm the suite
 
 ```powershell
 python -m pytest
 ```
 
-**You should see:** `1288 passed, 2 skipped`, exit code 0, and **silence**.
+**You should see:** `1300 passed, 2 skipped`, exit code 0, and **silence**.
 
 ## Still to come
 

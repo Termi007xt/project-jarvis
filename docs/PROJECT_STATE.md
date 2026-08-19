@@ -142,6 +142,34 @@ that change what the product can do:
 
 ## In Progress
 
+### 2026-08-06 late — a turn now finishes its work (ADR-0033)
+
+Three reports in one evening, one cause. The turn ended the moment the model
+produced text instead of a tool call, so *"I'll close it for you"* ended it as
+surely as closing it did. The owner's next message settled the design: asked
+*"did you close it?"*, Jarvis looked and said *"Nope, it's still there"* — it
+had the tool, the information and a system prompt telling it not to claim
+things it had not done. What it lacked was any reason to carry on.
+
+A turn now continues while its own reply describes work nothing did: a promise,
+a completion claim nothing verified, or a claim about a *different* action than
+the one performed. Bounded at 12 rounds and 3 follow-ups; when they run out the
+reply says the work did not happen. Every follow-up still goes through
+`ToolInvoker`'s six checks, so continuation creates no new path from a plan to
+an effect.
+
+The third shape came from *"YouTube Music is now open and playing the current
+song"* — `app.open` verified, nothing that can play anything ever ran. "Did any
+tool verify something?" answered yes. Claims are now matched against the tools
+that could have produced them (`CLAIM_EVIDENCE`), and a verified tool the
+mapping does not recognise is never contradicted, because it might be the one
+that did the work.
+
+**Known limits, recorded rather than discovered later:** `CLAIM_EVIDENCE` is a
+closed list and every new tool needs an entry. This stops a turn ending on an
+unkept promise; it cannot make the model choose the right tool, and a model that
+cannot do the job now fails after three attempts instead of one.
+
 ### 2026-08-06 evening — the grounding check was sound and its premise was false
 
 The owner asked Jarvis to close Microsoft Edge. The audit log is unambiguous:

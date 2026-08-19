@@ -89,6 +89,23 @@ has shipped yet.
   raw CDP, three decoy videos left untouched) and deferred by the owner rather
   than allowed to hold up the phase. Search and play work correctly meanwhile.
 
+### Changed
+
+- **A turn now finishes its work before it answers** (ADR-0033). Jarvis used to
+  stop the moment it produced words instead of a tool call, so *"I'll close it
+  for you"* ended the turn as surely as actually closing it did. A reply that
+  promises an action, claims one nothing verified, or claims a *different*
+  action from the one performed now goes back to the model with a record of what
+  did and did not change, up to three times, before the turn is allowed to end.
+  Still bounded: when the attempts run out the reply says plainly that the work
+  did not happen, because a loop that only exits on success is a hang.
+- **A verified tool only supports claims about what that tool does.** *"YouTube
+  Music is now open and playing the current song"* was accepted because
+  `app.open` had genuinely verified — while nothing capable of playing anything
+  had run at all. Claims are now matched against the tools that could have
+  produced them. A verified tool the mapping does not recognise is never
+  contradicted: it might be the one that did the work.
+
 ### Fixed
 
 - **"It was closed successfully" was not recognised as a claim that anything
