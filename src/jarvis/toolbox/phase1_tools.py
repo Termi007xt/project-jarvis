@@ -399,7 +399,15 @@ class MediaControlTool:
     spec = ToolSpec(
         tool_id="media.control",
         version="1.0.0",
-        description="Play, pause, skip or stop whatever is currently playing.",
+        description=(
+            "Play, pause, skip or stop whatever is currently playing, using the "
+            "media keys on the keyboard. This is how to control an application "
+            "that is already open and playing — YouTube Music, Spotify, a video "
+            "in a browser tab — and it is the right tool for 'play the current "
+            "song', 'pause', 'next track' and 'resume'. It works whatever is "
+            "playing and needs no search first. Note that play_pause is a "
+            "toggle: if something is already playing, it will stop it."
+        ),
         input_model=MediaControlInput,
         output_model=MediaControlOutput,
         risk=RiskLevel.LOW,

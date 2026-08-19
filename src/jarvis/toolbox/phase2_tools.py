@@ -400,7 +400,13 @@ class YouTubePlayTool:
         description=(
             "Play one of the results from the last youtube.search, chosen by its "
             "position in the list, counting from 0. 'The second video' is "
-            "position 1. There is no way to choose by title."
+            "position 1. There is no way to choose by title. "
+            "This drives youtube.com in the browser and needs a youtube.search "
+            "first — it cannot start playback on its own. It is NOT the way to "
+            "control the YouTube Music application: that is already-playing "
+            "audio, so use media.control for 'play the current song', 'pause' "
+            "or 'skip'. Reaching for this tool when the user simply wants "
+            "playback resumed causes a browser restart nobody asked for."
         ),
         input_model=YouTubePlayInput,
         output_model=YouTubePlayOutput,

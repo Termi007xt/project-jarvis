@@ -218,6 +218,7 @@ class ConversationEngine:
         refused: list[str] = []
         response: ChatResponse | None = None
         follow_ups = 0
+        verified_when_last_pushed = 0
 
         for round_number in range(1, self._max_tool_rounds + 1):
             turn.rounds = round_number
@@ -240,6 +241,28 @@ class ConversationEngine:
                 unfinished = _unfinished_business(
                     response.text or "", results, user_text
                 )
+
+                # A turn that is getting somewhere is not stalling. The budget
+                # counts *consecutive unproductive* pushes, so it resets
+                # whenever something has actually been done since the last one.
+                #
+                # Reported 2026-08-06: a three-part request spent its follow-ups
+                # on the first part and then ended mid-sentence — "Let me try a
+                # different approach - I'll use the media control tool
+                # directly:" — with the right next step named and never taken.
+                # `MAX_TOOL_ROUNDS` is still the hard bound, so this cannot run
+                # away; it only stops the count punishing progress.
+                verified_now = sum(
+                    1
+                    for result in results
+                    if getattr(result, "succeeded", False)
+                    and getattr(getattr(result, "verification", None), "value", "")
+                    == "verified"
+                )
+                if verified_now > verified_when_last_pushed:
+                    follow_ups = 0
+                verified_when_last_pushed = verified_now
+
                 if unfinished and follow_ups < self._max_follow_ups:
                     follow_ups += 1
                     messages.append(

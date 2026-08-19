@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from jarvis.common import utc_now
 from jarvis.core.tools.contract import Verification
-from jarvis.llm.conversation import ConversationEngine
+from jarvis.llm.conversation import MAX_TOOL_ROUNDS, ConversationEngine
 from jarvis.llm.grounding import claims_completion, promises_action
 from jarvis.llm.history import Conversation
 from jarvis.llm.ports import ChatResponse, ToolCallProposal
@@ -409,3 +409,51 @@ def test_an_ordinary_answer_is_not_pushed_back() -> None:
 
     assert provider.calls == 1
     assert turn.ok
+
+
+def test_progress_resets_the_budget_so_a_long_task_is_not_cut_off() -> None:
+    """Reported by the owner on 2026-08-06, on a three-part request.
+
+    The turn spent its follow-ups working through the first part and then ended
+    mid-sentence on the second:
+
+        "The browser restart didn't work properly. Let me try a different
+         approach - I'll use the media control tool directly:"
+
+    The right next step, named and never taken, because the budget had run out
+    three steps earlier. Counting *total* pushes punishes a task for being long;
+    what matters is whether the turn is stuck, and a turn that has completed
+    something since the last push plainly is not.
+
+    `MAX_TOOL_ROUNDS` is still the hard bound, so this cannot run away.
+    """
+    provider = ScriptedProvider(
+        "I'll open it for you.",            # push 1
+        _proposal("app.open"),              # progress
+        "Now I need to search for it.",     # push 2 — budget should have reset
+        _proposal("youtube.search"),        # progress
+        "Let me play it now.",              # push 3 — reset again
+        _proposal("youtube.play"),          # progress
+        "Playing now, Sir.",
+    )
+    invoker = RecordingInvoker()
+
+    ConversationEngine(provider, invoker).ask(
+        _conversation(), "open YouTube and play something"
+    )
+
+    assert invoker.invoked == ["app.open", "youtube.search", "youtube.play"], (
+        f"the turn was cut off while it was still making progress: {invoker.invoked}"
+    )
+
+
+def test_a_stall_with_no_progress_still_stops() -> None:
+    """The other half. Resetting on progress must not remove the bound."""
+    provider = ScriptedProvider("I'll close it for you.")  # forever, no tools
+    invoker = RecordingInvoker()
+
+    ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+
+    assert provider.calls <= MAX_TOOL_ROUNDS, (
+        f"an unproductive turn ran past its bound: {provider.calls}"
+    )
