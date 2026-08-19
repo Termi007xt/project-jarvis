@@ -219,6 +219,139 @@ def test_an_unrecognised_tool_is_never_contradicted() -> None:
     assert unbacked_claims("The song is now playing.", (future,)) == ()
 
 
+# =========================================================================
+# A failure nobody dealt with
+# =========================================================================
+class _Failure:
+    def __init__(self, tool_id, outcome="failed", message="it did not work") -> None:
+        self.tool_id = tool_id
+        self.outcome = outcome
+        self.succeeded = False
+        self.verification = Verification.FAILED
+        self.message = message
+        self.failure_code = "some_failure"
+        self.output = None
+
+
+class FailThenSucceed:
+    """Fails the first call to a tool and succeeds afterwards."""
+
+    def __init__(self, failing: str, message: str) -> None:
+        self.invoked: list[str] = []
+        self._failing = failing
+        self._message = message
+
+    def invoke(self, call):
+        self.invoked.append(call.tool_id)
+        if call.tool_id == self._failing and self.invoked.count(self._failing) == 1:
+            return _Failure(call.tool_id, message=self._message)
+        return _Result(call.tool_id, Verification.VERIFIED)
+
+
+def test_a_failed_tool_does_not_end_the_turn() -> None:
+    """The owner's YouTube Music session, from the audit log.
+
+        17:02:35  youtube.play  failed  "Brave is already open, and a browser
+                                         that is already running cannot..."
+        -- turn ended; Jarvis said "I need to restart the browser first"
+
+    The failure named its own remedy and the model said the right next step out
+    loud. It stopped because stopping was allowed. This is the strongest signal
+    available and the only one that needs no guess about English: a tool failed,
+    nothing put it right, so the request has not been carried out.
+    """
+    provider = ScriptedProvider(
+        _proposal("youtube.play"),
+        "The youtube.play tool failed because Brave is already open. I need to "
+        "restart the browser first using browser.restart, then try again.",
+        _proposal("browser.restart"),
+        _proposal("youtube.play"),
+        "Playing now, Sir.",
+    )
+    invoker = FailThenSucceed("youtube.play", "Brave is already open")
+
+    ConversationEngine(provider, invoker).ask(
+        _conversation(), "play whatever is in the queue"
+    )
+
+    assert invoker.invoked == ["youtube.play", "browser.restart", "youtube.play"], (
+        f"the turn stopped on a failure it could have worked past: {invoker.invoked}"
+    )
+
+
+def test_a_refused_permission_is_never_retried() -> None:
+    """`denied` is the user saying no, and nagging is worse than the bug.
+
+    A turn that retried a refusal would re-ask for approval until the follow-ups
+    ran out. That is one of the three ways this whole mechanism can go wrong,
+    and it is the one that would make Jarvis unpleasant to live with.
+    """
+    denied = _Failure("app.close", outcome="denied", message="you said no")
+
+    class Denier:
+        def __init__(self) -> None:
+            self.invoked: list[str] = []
+
+        def invoke(self, call):
+            self.invoked.append(call.tool_id)
+            return denied
+
+    provider = ScriptedProvider(
+        _proposal("app.close"),
+        "I could not close it — you did not approve that.",
+    )
+    invoker = Denier()
+
+    ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+
+    assert invoker.invoked == ["app.close"], (
+        f"a refusal was retried: {invoker.invoked}"
+    )
+
+
+def test_an_empty_reply_after_tools_carries_on_instead_of_explaining_itself() -> None:
+    """The owner heard the diagnostic read aloud.
+
+        Jarvis: "That went through, but the model returned no words to go with
+                 it. Here is what actually ran — window.list: 6 window(s) open;
+                 window.list: 6 window(s) open."
+
+    An empty reply is not an answer. If tools ran there is something to say
+    about them, and the turn should ask for it rather than narrate its own
+    plumbing at the user.
+    """
+    provider = ScriptedProvider(
+        _proposal("window.list"),
+        "",
+        "There are six windows open, Sir.",
+    )
+
+    turn = ConversationEngine(provider, RecordingInvoker()).ask(
+        _conversation(), "what is open?"
+    )
+
+    assert turn.reply == "There are six windows open, Sir."
+    assert "returned no words" not in turn.reply
+
+
+def test_narration_the_old_patterns_missed_now_carries_on() -> None:
+    """Three real stalls, none of which matched a known action verb.
+
+    "I'll **use** app.close", "I **need to** restart the browser first", "**Let
+    me proceed** with that". Extending the verb list a fourth time would have
+    been the third patch to the same guess; this is a loose net for intent of
+    any kind, and it is loose because it only decides whether to keep working.
+    """
+    from jarvis.llm.conversation import _states_an_intention
+
+    assert _states_an_intention("I'll use app.close to close it.")
+    assert _states_an_intention("I need to restart the browser first.")
+    assert _states_an_intention("Let me proceed with that.")
+    assert _states_an_intention("Now I need to open YouTube Music.")
+    # An offer is still a question awaiting an answer, not a stalled task.
+    assert not _states_an_intention("Would you like me to close it?")
+
+
 def test_a_model_that_only_ever_promises_still_stops() -> None:
     """FR-123. "Keep going until it is done" cannot become "keep going".
 

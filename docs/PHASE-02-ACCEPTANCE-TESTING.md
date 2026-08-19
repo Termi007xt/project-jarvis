@@ -1189,6 +1189,62 @@ could have produced them.
 gives up on something it should have managed. Those are the three ways this
 change can go wrong, and they are all worth knowing about immediately.
 
+## 4.21 — What your next three sessions changed 🆕
+
+Your first round of this caught it half-working: it asked for two permissions in
+a row, and then still stalled. Your transcripts showed why, and the audit log
+made it exact.
+
+**A failed tool now keeps the turn going.** This is the important one, and it
+needs no guessing about English at all:
+
+```
+17:02:35  youtube.play  failed  "Brave is already open, and a browser that is
+                                 already running cannot be given a port..."
+   -- turn ended; Jarvis said "I need to restart the browser first"
+17:03:39  youtube.play  failed  "nothing has been searched for yet"
+   -- turn ended; Jarvis said "Let me proceed with that"
+```
+
+Both failures name their own remedy, and both times the model said the right
+next step out loud before stopping. Your three exchanges should have been one.
+
+**Except a refusal.** `denied` is you saying no, and it is never retried —
+otherwise the turn would ask again until it ran out of attempts. Nagging you for
+permission you just refused would be worse than the bug being fixed.
+
+**Narration is caught much more loosely now.** *"I'll **use** app.close"*, *"I
+**need to** restart the browser first"*, *"**Let me proceed** with that"*, *"Now
+I need to search YouTube... **let me use** the YouTube search tool"* — none of
+those matched, because the check wanted a known action verb and "use" and
+"proceed" are not actions. Rather than add to that list a fourth time, any
+statement of intent now counts, as long as the turn was doing work. It is loose
+on purpose: it only decides whether to keep going, which costs one model call,
+not whether to contradict Jarvis in front of you.
+
+**An empty reply carries on.** You got read this, aloud:
+
+> "That went through, but the model returned no words to go with it. Here is
+> what actually ran — window.list: 6 window(s) open; window.list: 6 window(s)
+> open."
+
+That is Jarvis narrating its own plumbing at you. An empty reply is not an
+answer, so the turn now asks for one instead of explaining itself.
+
+**Retest:** *"Open YouTube and search for Godzilla"* — one ask, one turn. And
+*"Open YouTube Music and play whatever is in the queue"*, which needs an open, a
+possible browser restart, a search and a play — four steps that were four of
+your messages.
+
+### Still broken, and I am not claiming otherwise
+
+- **"YouTube Music" plays the wrong thing.** It searched YouTube for "youtube
+  music" and played the first result. `app.open` opens the YouTube Music PWA but
+  `youtube.search` and `youtube.play` drive YouTube — two different places, and
+  nothing tells the model they are not interchangeable. Not fixed here.
+- **All your other YouTube tabs still start playing.** Known limitation from
+  earlier, still documented, still not fixed.
+
 ## 4.16 — Confirm the suite
 
 ```powershell

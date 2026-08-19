@@ -99,6 +99,20 @@ has shipped yet.
   did and did not change, up to three times, before the turn is allowed to end.
   Still bounded: when the attempts run out the reply says plainly that the work
   did not happen, because a loop that only exits on success is a hang.
+- **A failed tool no longer ends the turn.** `youtube.play` failing with "Brave
+  is already open" — a failure that names its own remedy — used to stop
+  everything and report it, and the model would helpfully describe the restart
+  it was about to do and then not do it. A failure nothing has put right means
+  the request has not been carried out, so the turn works past it. A **denied**
+  permission is never retried: that is the user saying no, and asking again
+  would be worse than the problem.
+- **A reply that says what it is about to do keeps the turn going.** The check
+  used to need a known action verb, so "I'll **use** app.close", "I **need to**
+  restart the browser first" and "**Let me proceed**" all read as finished
+  answers. Any statement of intent now counts, while the turn is doing work.
+- **An empty reply is no longer explained to the user.** A model that returned
+  no words after running tools produced a diagnostic listing its own tool calls,
+  which was then read aloud. The turn asks for an answer instead.
 - **A verified tool only supports claims about what that tool does.** *"YouTube
   Music is now open and playing the current song"* was accepted because
   `app.open` had genuinely verified — while nothing capable of playing anything

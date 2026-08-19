@@ -422,6 +422,73 @@ _SOUNDS_FINISHED = re.compile(
 )
 
 
+#: Outcomes the turn may try to work past, and the ones it must not.
+#:
+#: `failed` and `blocked` are worth another attempt: a failure usually names its
+#: cause — `browser_restart_required` says exactly what to do — and a blocked
+#: call is often malformed parameters the model can correct.
+#:
+#: `denied` is emphatically not here. That is the *user* having said no, and a
+#: turn that retried it would ask them again, and again, until the follow-ups ran
+#: out. Nagging somebody for permission they have just refused is worse than the
+#: bug this loop exists to fix. `cancelled` is the same refusal by another route,
+#: and `timed_out` is excluded because a timed-out effect may have half happened
+#: and retrying it would be the one case where carrying on does damage.
+_WORTH_ANOTHER_TRY = frozenset({"failed", "blocked"})
+
+#: Any statement of what the model is about to do. Much looser than
+#: `grounding.PROMISE_PHRASES`, which needs a known action verb and so missed
+#: "I'll **use** app.close", "I **need to** restart the browser first" and
+#: "**Let me proceed** with that" — three real stalls in one session.
+#:
+#: Loose is right here and wrong there. This only decides whether to take
+#: another turn, which costs one model call; `grounding` decides whether to
+#: contradict the model in front of the user, which costs their trust.
+_INTENT_TO_ACT = re.compile(
+    r"\bi(?:'ll|'m going to|\s+will|\s+need\s+to|\s+have\s+to|\s+am\s+going\s+to|"
+    r"\s+should|\s+can\s+now|\s+plan\s+to)\b"
+    r"|\blet\s+me\b|\bnext,?\s+i\b|\bthen\s+i\b|\bgoing\s+to\s+(?:try|use|call)\b",
+    re.IGNORECASE,
+)
+
+
+def _states_an_intention(text: str) -> bool:
+    """Whether the reply says what it is about to do, rather than what it did.
+
+    Questions are skipped sentence by sentence, as everywhere else here: *"Want
+    me to close it properly?"* is an offer awaiting an answer, and acting on it
+    would answer the owner's question for them.
+    """
+    for sentence in re.split(r"(?<=[.!?\n])\s+", text or ""):
+        if sentence.rstrip().endswith("?"):
+            continue
+        if _INTENT_TO_ACT.search(sentence):
+            return True
+    return False
+
+
+def _unresolved_failure(results: list[Any]) -> Any | None:
+    """The last failure that nothing later put right, if there is one.
+
+    "Later succeeded" is judged per tool: `youtube.play` failing and then
+    `youtube.play` succeeding is resolved, while `youtube.play` failing and
+    `browser.restart` succeeding is progress but not an answer — the thing the
+    user asked for still has not happened.
+    """
+    succeeded_after: set[str] = set()
+    for result in reversed(results):
+        tool_id = str(getattr(result, "tool_id", ""))
+        outcome = str(getattr(getattr(result, "outcome", None), "value", "")) or str(
+            getattr(result, "outcome", "")
+        )
+        if getattr(result, "succeeded", False):
+            succeeded_after.add(tool_id)
+            continue
+        if outcome in _WORTH_ANOTHER_TRY and tool_id not in succeeded_after:
+            return result
+    return None
+
+
 def _unfinished_business(text: str, results: list[Any]) -> str | None:
     """Why this turn is not over yet, said to the model. None means it is over.
 
@@ -452,6 +519,40 @@ def _unfinished_business(text: str, results: list[Any]) -> str | None:
         unbacked_claims,
     )
 
+    # A failure nobody dealt with. The strongest signal here and the only one
+    # that needs no guess about English at all.
+    #
+    # The owner's YouTube Music session, from the audit log:
+    #
+    #   17:02:35  youtube.play  failed  "Brave is already open, and a browser
+    #                                    that is already running cannot..."
+    #   -- turn ended; Jarvis said "I need to restart the browser first"
+    #   17:03:39  youtube.play  failed  "nothing has been searched for yet"
+    #   -- turn ended; Jarvis said "Let me proceed with that"
+    #
+    # Both failures name their own remedy, and the model said the right next
+    # step out loud each time. It stopped because stopping was allowed. Three
+    # exchanges that should have been one.
+    unresolved = _unresolved_failure(results)
+    if unresolved is not None:
+        return (
+            f"{unresolved.tool_id} failed: {getattr(unresolved, 'message', '')} "
+            "Nothing has been reported to the user yet and the turn is not over. "
+            "Deal with it now — call whatever tool fixes it and then try again, "
+            "or, if it cannot be fixed, say plainly what failed and why. Do not "
+            "answer with a description of what you would do next."
+        )
+
+    # No words at all. The model sometimes returns an empty message after a tool
+    # call; that used to end the turn and print a diagnostic, which the owner
+    # then had read aloud to them. An empty reply is not an answer, and if tools
+    # ran there is something to say about them.
+    if results and not (text or "").strip():
+        return (
+            "You returned no words. Say what happened, in one or two sentences "
+            "— or, if the request is not finished, carry on and finish it."
+        )
+
     verified = tuple(
         result
         for result in results
@@ -459,7 +560,18 @@ def _unfinished_business(text: str, results: list[Any]) -> str | None:
         and getattr(getattr(result, "verification", None), "value", "") == "verified"
     )
     unbacked = unbacked_claims(text, tuple(results))
-    promised = promises_action(text)
+    # `promises_action` knows a closed list of action verbs and kept missing the
+    # real ones: "I'll **use** app.close", "I **need to** restart the browser
+    # first", "**Let me proceed** with that" — all narration instead of action,
+    # none of them matched. Rather than extend that list a fourth time, this is
+    # a deliberately loose net for *intent of any kind*, used only to decide
+    # whether to carry on.
+    #
+    # Gated on a tool having run, so it applies to a turn that is doing work and
+    # not to conversation. "I'll be here if you need me" is not a stalled task.
+    promised = promises_action(text) or (
+        bool(results) and _states_an_intention(text)
+    )
     # Deliberately a wider net than the one `review_response` rewrites with.
     # The two decisions have opposite costs: pushing back on a turn that was
     # actually finished costs one model call and an "it is already done", while
