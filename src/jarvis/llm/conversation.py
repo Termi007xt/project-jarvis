@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -69,6 +70,17 @@ MAX_TOOL_ROUNDS = 12
 #: wearing a helpful expression, and PRD FR-123 forbids it besides.
 MAX_FOLLOW_UPS = 3
 
+#: How long to let the desktop settle after a step that changed something.
+#:
+#: Asked for by the owner on 2026-08-06: "a break pause of 1-2 seconds so my
+#: computer can actually open the application for jarvis to act". `app.open`
+#: waits for the *process*, which exists well before its window does, so a
+#: chained step could arrive at a desktop still in the middle of changing.
+#:
+#: Only after a verified state change, so reading tools stay immediate — a
+#: second added to every window listing would be a second of nothing.
+SETTLE_SECONDS = 1.0
+
 BASE_SYSTEM_PROMPT = """\
 You are Jarvis, a local-first assistant running on the user's own Windows computer.
 
@@ -86,6 +98,24 @@ Rules you cannot set aside:
   goes through the permission system rather than through you.
 - If you do not know, say you do not know. A guess presented as fact is worse
   than an admission.
+
+How to carry out a request:
+
+- Do the whole thing. A request with several parts is not finished until every
+  part is done. Work through them one tool call at a time, in order, and keep
+  going — you are not expected to answer after the first step.
+- Saying what you are about to do is not doing it. If you find yourself writing
+  "I'll now...", "let me...", or "I need to...", call the tool instead.
+- When a tool fails, read why. Most failures say what would fix them. Fix it and
+  try again rather than reporting the failure and stopping.
+- Before you tell the user something is done, check. Use a reading tool to look
+  at the result — the window list, the active window — rather than assuming the
+  action worked because you asked for it. If the check disagrees with what you
+  were about to say, say what the check found.
+- Do the obvious thing rather than asking. If the request is clear enough to
+  attempt, attempt it; you can report what happened afterwards. Ask only when
+  you genuinely cannot proceed without an answer, and never ask the user to
+  confirm something they have just asked for.
 """
 
 
@@ -122,6 +152,7 @@ class ConversationEngine:
         max_context_messages: int = 24,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
         max_follow_ups: int = MAX_FOLLOW_UPS,
+        settle_seconds: float = SETTLE_SECONDS,
         session_id: str | None = None,
         user_name: str = "",
     ) -> None:
@@ -134,6 +165,7 @@ class ConversationEngine:
         self._max_context_messages = max_context_messages
         self._max_tool_rounds = max_tool_rounds
         self._max_follow_ups = max_follow_ups
+        self._settle_seconds = settle_seconds
         self._session_id = session_id
 
     @property
@@ -205,7 +237,9 @@ class ConversationEngine:
                 # the work got. Asked directly afterwards, it looked and said
                 # the window was still open, so it had the information and
                 # simply had no reason to act on it.
-                unfinished = _unfinished_business(response.text or "", results)
+                unfinished = _unfinished_business(
+                    response.text or "", results, user_text
+                )
                 if unfinished and follow_ups < self._max_follow_ups:
                     follow_ups += 1
                     messages.append(
@@ -247,6 +281,25 @@ class ConversationEngine:
                         untrusted=True,
                     )
                 )
+
+            # Let the desktop catch up before the next step looks at it.
+            #
+            # Asked for by the owner: "a break pause of 1-2 seconds so my
+            # computer can actually open the application for jarvis to act".
+            # `app.open` waits for the *process*, which appears well before the
+            # window does, so the next tool in a chain can arrive at a desktop
+            # that has not finished changing — and then reads a window list
+            # taken half a second too early.
+            #
+            # Only after something actually changed. A pause after a listing
+            # would be a second added to every read for no reason.
+            if self._settle_seconds and any(
+                getattr(result, "succeeded", False)
+                and getattr(getattr(result, "verification", None), "value", "")
+                == "verified"
+                for result in results[-len(response.tool_calls) :]
+            ):
+                time.sleep(self._settle_seconds)
 
             # What has and, more usefully, has *not* happened. Trusted: this is
             # the engine's own record of its own invocations, not anything a
@@ -452,6 +505,62 @@ _INTENT_TO_ACT = re.compile(
 )
 
 
+#: What the *user* asked for, and which tools could carry it out.
+#:
+#: The other checks all read the model's reply, and the model's reply keeps
+#: finding new ways to be slippery: "was closed" rather than "has been closed",
+#: "let me **use** the search tool" rather than a known action verb, "It's
+#: already playing" rather than "is now playing". Three patches to the same
+#: guess.
+#:
+#: This reads the request instead. The owner's words are the specification, they
+#: are short, and they are imperative — *"open YouTube music and play whatever
+#: song is in the queue"* names two actions plainly, and no tool that can play
+#: anything ever ran. Checking the instruction against what happened is a much
+#: better question than checking the summary against what happened.
+_REQUESTED_ACTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("play", r"\b(?:play|resume|put on)\b", ("media.control", "youtube.play")),
+    ("pause", r"\b(?:pause|stop playing)\b", ("media.control",)),
+    (
+        "open",
+        r"\b(?:open|launch|start up|fire up)\b",
+        ("app.open", "web.open_url", "browser.restart"),
+    ),
+    ("search", r"\b(?:search|look up|google)\b", ("web.search", "youtube.search")),
+    ("close", r"\b(?:close|quit|shut)\b", ("app.close", "app.force_close")),
+    ("screenshot", r"\b(?:screenshot|screen shot)\b", ("screen.capture",)),
+)
+
+_REQUESTED_PATTERNS = tuple(
+    (name, re.compile(pattern, re.IGNORECASE), tools)
+    for name, pattern, tools in _REQUESTED_ACTIONS
+)
+
+
+def outstanding_requests(user_text: str, results: list[Any]) -> tuple[str, ...]:
+    """Actions the user asked for that nothing has even attempted.
+
+    **Attempted**, not succeeded — the distinction is what stops this becoming a
+    retry loop. `app.close` that ran and came back unverified because Edge put a
+    dialog up has been attempted; the honest answer is to say so, not to close
+    it again while the owner is reading the prompt. So the question here is only
+    ever "did anything that could do this even run?".
+
+    A question is not an instruction. "Can you close a window?" asks what Jarvis
+    is capable of, and answering it is a complete turn.
+    """
+    request = (user_text or "").strip()
+    if not request or request.endswith("?"):
+        return ()
+
+    attempted = {str(getattr(result, "tool_id", "")) for result in results}
+    return tuple(
+        name
+        for name, pattern, tools in _REQUESTED_PATTERNS
+        if pattern.search(request) and not attempted.intersection(tools)
+    )
+
+
 def _states_an_intention(text: str) -> bool:
     """Whether the reply says what it is about to do, rather than what it did.
 
@@ -489,7 +598,9 @@ def _unresolved_failure(results: list[Any]) -> Any | None:
     return None
 
 
-def _unfinished_business(text: str, results: list[Any]) -> str | None:
+def _unfinished_business(
+    text: str, results: list[Any], user_text: str = ""
+) -> str | None:
     """Why this turn is not over yet, said to the model. None means it is over.
 
     Three shapes end a turn dishonestly, and they are one situation: the reply
@@ -541,6 +652,27 @@ def _unfinished_business(text: str, results: list[Any]) -> str | None:
             "Deal with it now — call whatever tool fixes it and then try again, "
             "or, if it cannot be fixed, say plainly what failed and why. Do not "
             "answer with a description of what you would do next."
+        )
+
+    # Something the owner asked for that nothing has even attempted. Checked
+    # against the *request*, which is the one thing in the turn that is short,
+    # plain and not written by the model.
+    #
+    #   Sir: open YouTube music and play whatever song is in the queue.
+    #   Jarvis: YouTube Music is now open ... It's already playing the current
+    #           song. The application shows as running with process ID 4760.
+    #
+    # `app.open` had verified, nothing that can play anything had run, and the
+    # claim slipped every pattern watching the reply — a contraction and the
+    # word "already" were enough. The instruction did not slip: it said "play".
+    outstanding = outstanding_requests(user_text, results)
+    if outstanding:
+        return (
+            f"The user asked you to {', '.join(outstanding)} and no tool that "
+            "can do that has been called. Do it now — one tool call at a time, "
+            "in order. If you genuinely cannot, say which part you could not do "
+            "and why. Do not ask the user to confirm something they have "
+            "already asked for."
         )
 
     # No words at all. The model sometimes returns an empty message after a tool

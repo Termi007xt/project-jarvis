@@ -91,6 +91,21 @@ has shipped yet.
 
 ### Changed
 
+- **Nine more applications Jarvis can open**: Microsoft Edge, Notepad, File
+  Explorer, Discord, WhatsApp, Settings, Camera, Microsoft Store and Calculator.
+  Every path and app id was checked against a real machine rather than guessed.
+  This widens the *catalogue*, which is the thing designed to be widened — each
+  entry is still a fixed argument vector going through the single launch call
+  site, the interpreter denylist and the same permission check, and there is
+  still no way to name a binary that is not an entry.
+- **A turn checks the request against what actually ran.** "Open YouTube Music
+  and play whatever is in the queue" is two instructions, and the turn now
+  notices when nothing capable of the second one was ever called — rather than
+  trying to catch the model saying "it's already playing". Attempted counts, not
+  just succeeded, so a close that stopped on a save prompt is reported rather
+  than tried again.
+- **A one-second settle after a step that changed something**, so an
+  application has time to appear before the next step looks for its window.
 - **A turn now finishes its work before it answers** (ADR-0033). Jarvis used to
   stop the moment it produced words instead of a tool call, so *"I'll close it
   for you"* ended the turn as surely as actually closing it did. A reply that

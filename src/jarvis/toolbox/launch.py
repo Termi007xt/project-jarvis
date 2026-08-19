@@ -532,6 +532,103 @@ def default_catalogue(config: object | None = None) -> ApplicationCatalogue:
                 verify_process_names=("brave.exe",),
                 aliases=("youtube music", "music", "yt music", "ytmusic"),
             ),
+            # -- everyday applications ------------------------------------
+            #
+            # Added 2026-08-06 at the owner's request: "pls add all low-med risk
+            # apps in approved, i dont want to be so limited in testing".
+            #
+            # This widens the *catalogue*, which is the thing ADR-0029 built to
+            # be widened — entries are fixed argument vectors the owner approves,
+            # and every one still goes through the single `launch_argv` call
+            # site, the interpreter denylist and the same permission check. It
+            # does not widen what Jarvis may execute: there is still no way to
+            # name a binary that is not an entry here.
+            #
+            # Every path and AUMID below was checked against this machine before
+            # being written down, rather than guessed from convention.
+            ApplicationEntry(
+                app_id="edge",
+                display_name="Microsoft Edge",
+                kind=LaunchKind.EXECUTABLE,
+                target=rf"{program_files_x86}\Microsoft\Edge\Application\msedge.exe",
+                argument_kind=ArgumentKind.URL,
+                verify_process_names=("msedge.exe",),
+                aliases=("ms edge", "edge browser", "microsoft edge"),
+            ),
+            ApplicationEntry(
+                app_id="notepad",
+                display_name="Notepad",
+                kind=LaunchKind.EXECUTABLE,
+                target=r"C:\Windows\System32\notepad.exe",
+                verify_process_names=("notepad.exe",),
+                aliases=("note pad",),
+            ),
+            ApplicationEntry(
+                app_id="file_explorer",
+                display_name="File Explorer",
+                kind=LaunchKind.EXECUTABLE,
+                target=r"C:\Windows\explorer.exe",
+                verify_process_names=("explorer.exe",),
+                aliases=("explorer", "files", "my computer", "this pc"),
+            ),
+            ApplicationEntry(
+                app_id="discord",
+                display_name="Discord",
+                kind=LaunchKind.EXECUTABLE,
+                # Discord installs each version into its own `app-x.y.z` folder,
+                # so the versioned executable is not a stable target. `Update.exe
+                # --processStart` is the shortcut's own vector and survives an
+                # update; the arguments are fixed here, not composed by anyone.
+                target=os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""), "Discord", "Update.exe"
+                ),
+                fixed_arguments=("--processStart", "Discord.exe"),
+                verify_process_names=("Discord.exe",),
+                aliases=("discord app",),
+            ),
+            ApplicationEntry(
+                app_id="whatsapp",
+                display_name="WhatsApp",
+                kind=LaunchKind.STORE_APP,
+                target="5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+                verify_process_names=("WhatsApp.exe", "WhatsApp.Root.exe"),
+                aliases=("whats app", "whatsapp desktop"),
+            ),
+            ApplicationEntry(
+                app_id="settings",
+                display_name="Settings",
+                kind=LaunchKind.STORE_APP,
+                target=(
+                    "windows.immersivecontrolpanel_cw5n1h2txyewy"
+                    "!microsoft.windows.immersivecontrolpanel"
+                ),
+                verify_process_names=("SystemSettings.exe",),
+                aliases=("windows settings", "system settings"),
+            ),
+            ApplicationEntry(
+                app_id="camera",
+                display_name="Camera",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+                verify_process_names=("WindowsCamera.exe",),
+                aliases=("webcam",),
+            ),
+            ApplicationEntry(
+                app_id="microsoft_store",
+                display_name="Microsoft Store",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsStore_8wekyb3d8bbwe!App",
+                verify_process_names=("WinStore.App.exe",),
+                aliases=("ms store", "store", "app store"),
+            ),
+            ApplicationEntry(
+                app_id="calculator",
+                display_name="Calculator",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+                verify_process_names=("CalculatorApp.exe", "Calculator.exe"),
+                aliases=("calc",),
+            ),
             ApplicationEntry(
                 app_id="xbox",
                 display_name="Xbox",

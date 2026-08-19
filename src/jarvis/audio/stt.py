@@ -67,7 +67,65 @@ def strip_wake_phrase(text: str, phrase: str) -> str:
     pattern = re.compile(
         r"^\W*" + r"[\s,.\-]*".join(words) + r"\s*[,.:;!?]*\s*", re.IGNORECASE
     )
-    return pattern.sub("", text, count=1).strip()
+    stripped = pattern.sub("", text, count=1).strip()
+    if stripped != text.strip():
+        return stripped
+    return _strip_misheard_wake_word(text, phrase)
+
+
+#: Greetings that may precede the name and are part of the wake, not the command.
+_WAKE_GREETINGS = frozenset(
+    {"hey", "hi", "hello", "ok", "okay", "yo", "hey,", "so", "a"}
+)
+
+
+def _strip_misheard_wake_word(text: str, phrase: str) -> str:
+    """Remove a leading wake word the recogniser spelled wrong (FR-024).
+
+    The exact match above wants every word of "Hey Jarvis" in order, and what
+    actually arrives is whatever faster-whisper made of a word shouted at a
+    microphone. Reported by the owner on 2026-08-06:
+
+        Sir: H-Arvis Open MS Edge and Brave
+        Jarvis: ... I notice you mentioned "H-Arvis" and "Open MS Edge and
+                Brave" - it seems there may have been some text mixed together.
+
+    The wake word then reaches the planner as part of the instruction, and the
+    model quite reasonably tries to make sense of it — spending a turn asking
+    about a word the owner never said.
+
+    Only the first token or two, only when it is a near-miss of the name, and
+    never the whole word: "jar" and "Java" are ordinary words and must survive.
+    Matching is on the name alone, because that is the part being misheard —
+    "Hey" comes through fine.
+    """
+    from difflib import SequenceMatcher
+
+    name = (phrase.split() or [""])[-1].casefold()
+    if not name:
+        return text.strip()
+
+    tokens = text.strip().split()
+    if not tokens:
+        return text.strip()
+
+    index = 0
+    if len(tokens) > 1 and _letters(tokens[0]) in _WAKE_GREETINGS:
+        index = 1
+    if index >= len(tokens):
+        return text.strip()
+
+    candidate = _letters(tokens[index])
+    # 0.75 keeps "harvis" (0.83) and "jarviss" (0.92) and rejects "java" (0.4)
+    # and "jar" (0.67). A near-miss of a six-letter name is a mishearing; a
+    # short word that merely starts the same way is a word.
+    if candidate and SequenceMatcher(None, candidate, name).ratio() >= 0.75:
+        return " ".join(tokens[index + 1 :]).lstrip(" ,.:;!?").strip()
+    return text.strip()
+
+
+def _letters(token: str) -> str:
+    return re.sub(r"[^a-z]", "", token.casefold())
 
 
 def needs_confirmation(
