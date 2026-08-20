@@ -90,6 +90,20 @@ has shipped yet.
   `permissions.always_allowable_capabilities`; no other medium-risk capability
   is affected and high-risk ones can never be listed.
 
+### Security
+
+- **Every untrusted surface is now exercised by the same adversarial corpus**
+  (P2-BRW-06, AT-007). Twelve payloads — instruction override, forged system
+  turns, forged tool calls, wrapper escape, zero-width and direction-override
+  characters, homoglyphs, and sheer length — run against every content class
+  Jarvis can observe, not just the web results the original test used. Phase 2
+  tripled the number of surfaces that carry somebody else's words (window
+  titles, file names) and each was added on a different day; a test now fails if
+  a new content class appears that the corpus does not cover, because
+  "we remembered on the day" is not a security argument.
+- **File names are carried as `file_name` content**, not as generic UI text. The
+  class already existed and the new search was not using it.
+
 ### Known limitations
 
 - **Opening the browser wakes the owner's other tabs, and YouTube tabs among

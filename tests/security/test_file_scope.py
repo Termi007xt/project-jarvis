@@ -180,5 +180,5 @@ def test_a_file_name_is_carried_as_data_not_instruction(
 
     observed = as_observed_list(search_files("ignore", scope))
 
-    assert observed.content_class.value == "ui_text"
+    assert observed.content_class.value == "file_name"
     assert all(item.handle.startswith("nth=") for item in observed.items)

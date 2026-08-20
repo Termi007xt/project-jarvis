@@ -469,7 +469,7 @@ and recovery exist to back them.
 | P2-BRW-03 | Browser session control: clear profile, cookies, site permissions | FR-057 | P2-BRW-01 | S | Not started |
 | P2-BRW-04 | CAPTCHA / anti-bot pause-and-request-user | FR-058 | P2-BRW-02 | M | Partial — CAPTCHA pause exists |
 | P2-BRW-05 | Internet research: search modes, explicit network indicator, sourced summaries | FR-050, FR-051, FR-053 | P2-BRW-02 | L | Not started |
-| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Partial — untrusted wrapping done; adversarial suite pending |
+| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Done |
 | P2-BRW-07 | AI website prompting adapter (Gemini/ChatGPT-class sites) | FR-055 | P2-BRW-01 | M | Not started |
 | P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Done |
 | P2-BRW-09 | YouTube Music search; ambiguous-match clarifying question | FR-092, FR-093 | P2-BRW-08 | M | Not started |

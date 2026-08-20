@@ -334,7 +334,7 @@ def as_observed_list(matches: Sequence[FileMatch]) -> ObservedList:
     """
     return ObservedList(
         origin="files:search",
-        content_class=ContentClass.UI_TEXT,
+        content_class=ContentClass.FILE_NAME,
         items=tuple(
             ObservedItem(index=match.index, label=match.name, handle=f"nth={match.index}")
             for match in matches
