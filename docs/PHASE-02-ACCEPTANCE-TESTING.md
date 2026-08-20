@@ -1322,3 +1322,83 @@ python -m pytest
 Not built, so don't test for them: reading screen *contents* (vision, Phase 4),
 and the full capture-scope hierarchy with a real retention policy — right now
 the only guarantee is that the folder keeps the newest 20 captures.
+
+
+---
+
+# Closing Phase 2 — the full test list
+
+Everything below is what I need from you to call the phase done. It is ordered
+so the quick confidence checks come first.
+
+## C.1 — The suite, two ways
+
+```powershell
+python -m pytest -m "not slow"     # ~80s, opens no socket
+python -m pytest tests\security     # ~7s
+```
+
+**You should see:** `1488 passed, 4 skipped, 3 deselected` and
+`485 passed, 3 skipped`. Exit code 0 both times.
+
+The three deselected really do download the wake-word models from GitHub. Run
+`python -m pytest` bare if you want them; expect it to take three or four times
+as long, and to need the internet.
+
+## C.2 — Files, end to end 🆕
+
+1. *"Find my budget spreadsheet"* (or any file you have) → a numbered list.
+2. *"Show me the second one"* → Explorer opens with it selected.
+3. *"Open the first one"* → it opens **in Notepad** if it is a text-ish file.
+4. Try it on a `.pdf` or `.docx` → it should **refuse**, and tell you which
+   kinds it can open.
+
+That refusal is the feature, not a gap. Opening "with the default app" means
+asking Windows which program is registered for that extension — and that
+registry is rewritten by whatever you installed last, with several defaults
+(`.hta`, `.ps1`, `.scr`, `.url`) that run code. So Jarvis only hands a file to an
+application already on your approved list. **If you want `.pdf` and `.docx`, the
+answer is to add those applications**, and then it works. Tell me which ones.
+
+## C.3 — Multi-step, one ask
+
+- *"Open YouTube and search for Godzilla"*
+- *"Open Notepad, then open Brave, then close Notepad"*
+
+**You should see:** one turn, approvals as needed, all parts done. Not a reply
+that describes what it is about to do.
+
+## C.4 — Windows and capture
+
+- *"What's open?"* → plain application names.
+- *"Put my IDE on the left half"* → it moves, and the answer names the window it
+  actually moved.
+- *"Take a screenshot"* → a visible notice **before** the capture, and a file in
+  `captures\`.
+- *"What's on my screen?"* → names the front window and says plainly that it
+  cannot read the contents.
+- *"Close Notepad"* with unsaved text → it stops at the save prompt and hands it
+  to you. It must never say "closed".
+
+## C.5 — The things that should refuse
+
+- *"Open my password manager"* → refused by name if you have one.
+- Ask it to find something in `C:\Windows` → outside the approved folders.
+- *"Force close Brave"* → a fresh confirmation, **every single time**, with no
+  "always" option.
+
+## C.6 — Read this rather than test it
+
+`docs/KNOWN_ISSUES.md` — thirteen things that are still there, with what was
+done about each. The three that will affect you most:
+
+- **your other YouTube tabs still start playing** when Jarvis opens the browser;
+- **YouTube Music search** is not built, so "play X on YouTube Music" will do
+  something else;
+- **screenshot retention** keeps the newest 20 and nothing smarter.
+
+## C.7 — Tell me
+
+Anything that differs, **verbatim**. Both of the worst bugs this phase — the
+false "closed" and the false "playing" — were found from you pasting the exact
+sentence back, and neither would have been found any other way.

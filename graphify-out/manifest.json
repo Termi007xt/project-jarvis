@@ -110,9 +110,9 @@
     "semantic_hash": "a658977180e62d8f88b5e80429ee6d52"
   },
   "src/jarvis/core/tools/invoker.py": {
-    "mtime": 1785915548.9092996,
-    "ast_hash": "a7602303b8d650e4d7a85a1ac8f97d43",
-    "semantic_hash": "a7602303b8d650e4d7a85a1ac8f97d43"
+    "mtime": 1786025963.8713772,
+    "ast_hash": "f1137345d70e9eb011d146f7ff143083",
+    "semantic_hash": "f1137345d70e9eb011d146f7ff143083"
   },
   "src/jarvis/core/tools/ports.py": {
     "mtime": 1785915543.7391298,
@@ -165,9 +165,9 @@
     "semantic_hash": "d5ff0608b11ce322332ae415bc039700"
   },
   "src/jarvis/runtime/core.py": {
-    "mtime": 1786023644.617716,
-    "ast_hash": "d2e4869d26137c2e5ced81ffe718268c",
-    "semantic_hash": "d2e4869d26137c2e5ced81ffe718268c"
+    "mtime": 1787213571.0185535,
+    "ast_hash": "07559089f858d3f6f12b33742430b77a",
+    "semantic_hash": "07559089f858d3f6f12b33742430b77a"
   },
   "src/jarvis/runtime/single_instance.py": {
     "mtime": 1785609926.572534,
@@ -275,9 +275,9 @@
     "semantic_hash": "71fdee940b27f085c7b4322c63f28eac"
   },
   "tests/acceptance/test_phase0_exit_criteria.py": {
-    "mtime": 1786023961.9745328,
-    "ast_hash": "0547d4e4fac40e538380fcc416365f7f",
-    "semantic_hash": "0547d4e4fac40e538380fcc416365f7f"
+    "mtime": 1787213670.3443716,
+    "ast_hash": "92658a37b306f3501a116b43c0a612e1",
+    "semantic_hash": "92658a37b306f3501a116b43c0a612e1"
   },
   "tests/conftest.py": {
     "mtime": 1785846584.01334,
@@ -395,9 +395,9 @@
     "semantic_hash": "575543b1ba9745b883bbb4aaf7004d2b"
   },
   "CHANGELOG.md": {
-    "mtime": 1786024321.56861,
-    "ast_hash": "64bf24e34790360d45079466af6b895f",
-    "semantic_hash": "64bf24e34790360d45079466af6b895f"
+    "mtime": 1787213768.1012483,
+    "ast_hash": "c6319da5502769b55bb6e06ab610a1b3",
+    "semantic_hash": "c6319da5502769b55bb6e06ab610a1b3"
   },
   "DATA_MODEL.md": {
     "mtime": 1785825134.166964,
@@ -435,9 +435,9 @@
     "semantic_hash": "5ecd1ec0f4de22362987559fa3854400"
   },
   "docs/BACKLOG.md": {
-    "mtime": 1785830370.0720682,
-    "ast_hash": "841f60acd5cc208590da8e209b90510f",
-    "semantic_hash": "841f60acd5cc208590da8e209b90510f"
+    "mtime": 1787214085.756997,
+    "ast_hash": "3a2d0c619792e7b24b3f178b7db0ab26",
+    "semantic_hash": "3a2d0c619792e7b24b3f178b7db0ab26"
   },
   "docs/decisions/ADR-0001-python-first-rust-deferred.md": {
     "mtime": 1785250562.687536,
@@ -615,9 +615,9 @@
     "semantic_hash": "cf6298f25ed8de3d9ea870634ea6412f"
   },
   "src/jarvis/audio/stt.py": {
-    "mtime": 1785825134.1914773,
-    "ast_hash": "0849faea0a8997bbaf47bb866f52bf57",
-    "semantic_hash": "0849faea0a8997bbaf47bb866f52bf57"
+    "mtime": 1787160337.0146668,
+    "ast_hash": "80e3995cb9ef54f44611f5932558f9ee",
+    "semantic_hash": "80e3995cb9ef54f44611f5932558f9ee"
   },
   "src/jarvis/audio/tts.py": {
     "mtime": 1785846394.0123136,
@@ -640,14 +640,14 @@
     "semantic_hash": "9f05dae6a303af8f49ce0e2f04ff76e9"
   },
   "src/jarvis/llm/conversation.py": {
-    "mtime": 1785933738.920559,
-    "ast_hash": "a23fcbc34ca820f8ea0b93cf500879b5",
-    "semantic_hash": "a23fcbc34ca820f8ea0b93cf500879b5"
+    "mtime": 1787161223.0006793,
+    "ast_hash": "27342b9e2db792c158f3f1720deb16b6",
+    "semantic_hash": "27342b9e2db792c158f3f1720deb16b6"
   },
   "src/jarvis/llm/grounding.py": {
-    "mtime": 1785915671.1219885,
-    "ast_hash": "41bcd92e4bea3ed798badf6f6ccce365",
-    "semantic_hash": "41bcd92e4bea3ed798badf6f6ccce365"
+    "mtime": 1787158454.751195,
+    "ast_hash": "e012813f2e10e3b2d569c94bb2cff4db",
+    "semantic_hash": "e012813f2e10e3b2d569c94bb2cff4db"
   },
   "src/jarvis/llm/history.py": {
     "mtime": 1785825134.1969776,
@@ -770,9 +770,9 @@
     "semantic_hash": "c036c68474ff24c0b6cf12552f53eed8"
   },
   "src/jarvis/toolbox/launch.py": {
-    "mtime": 1785842371.05505,
-    "ast_hash": "8fd970b3dd5ea4ce8be8178b0cc0f7b6",
-    "semantic_hash": "8fd970b3dd5ea4ce8be8178b0cc0f7b6"
+    "mtime": 1787213490.6338067,
+    "ast_hash": "0d40734acb6d08b553b82fcd653a634f",
+    "semantic_hash": "0d40734acb6d08b553b82fcd653a634f"
   },
   "src/jarvis/toolbox/media.py": {
     "mtime": 1785825134.2019882,
@@ -780,9 +780,9 @@
     "semantic_hash": "b43ae9478d647692e87b4623cd588ff6"
   },
   "src/jarvis/toolbox/phase1_tools.py": {
-    "mtime": 1785915680.403442,
-    "ast_hash": "eb40b756b89a330a2ef4d3b67b3867b6",
-    "semantic_hash": "eb40b756b89a330a2ef4d3b67b3867b6"
+    "mtime": 1787161187.4358225,
+    "ast_hash": "a86634d3a644255c75ca610b6b34cd74",
+    "semantic_hash": "a86634d3a644255c75ca610b6b34cd74"
   },
   "src/jarvis/ui/voice_controller.py": {
     "mtime": 1785825134.2059882,
@@ -825,9 +825,9 @@
     "semantic_hash": "2dd5dc33babee3bb33fd19089352516d"
   },
   "tests/unit/test_wake_install.py": {
-    "mtime": 1785825134.2189949,
-    "ast_hash": "0ec6a17564145099c99664f3b4f8c6ca",
-    "semantic_hash": "0ec6a17564145099c99664f3b4f8c6ca"
+    "mtime": 1787211290.1775825,
+    "ast_hash": "68ca864574876a2a750991315b6af32f",
+    "semantic_hash": "68ca864574876a2a750991315b6af32f"
   },
   "src/jarvis/audio/cues.py": {
     "mtime": 1785825134.1879718,
@@ -912,12 +912,12 @@
   "docs/PHASE-02-ACCEPTANCE-TESTING.md": {
     "mtime": 1786024072.4228644,
     "ast_hash": "afe10cdacb4709e7c4ea9d1c6732fab7",
-    "semantic_hash": "afe10cdacb4709e7c4ea9d1c6732fab7"
+    "semantic_hash": ""
   },
   "docs/PROJECT_STATE.md": {
-    "mtime": 1786024288.06882,
-    "ast_hash": "6563581595e742e1934cc36bc087390b",
-    "semantic_hash": "6563581595e742e1934cc36bc087390b"
+    "mtime": 1787211693.6665218,
+    "ast_hash": "72a1c5fa9eb58ec9bb74ebd4029d4ca8",
+    "semantic_hash": "72a1c5fa9eb58ec9bb74ebd4029d4ca8"
   },
   "docs/decisions/ADR-0027-approval-and-activation-interaction-model.md": {
     "mtime": 1785825134.1709645,
@@ -990,9 +990,9 @@
     "semantic_hash": "787d17dfaed85510e5ae859fb436ed9e"
   },
   "src/jarvis/toolbox/phase2_tools.py": {
-    "mtime": 1785918949.6681755,
-    "ast_hash": "03a254600edf868f68088a0b97d61610",
-    "semantic_hash": "03a254600edf868f68088a0b97d61610"
+    "mtime": 1787161196.057104,
+    "ast_hash": "9db7baec9c5e0029e3b9e9afabe412a9",
+    "semantic_hash": "9db7baec9c5e0029e3b9e9afabe412a9"
   },
   "src/jarvis/toolbox/uia.py": {
     "mtime": 1785841556.6629152,
@@ -1198,5 +1198,70 @@
     "mtime": 1785933094.0984838,
     "ast_hash": "02896a68d60596db9eabb8b4c3e04e5c",
     "semantic_hash": "02896a68d60596db9eabb8b4c3e04e5c"
+  },
+  "src/jarvis/toolbox/files.py": {
+    "mtime": 1787212329.9435072,
+    "ast_hash": "14c50d32b41f395ad1372ebf595058f2",
+    "semantic_hash": "14c50d32b41f395ad1372ebf595058f2"
+  },
+  "src/jarvis/toolbox/phase2_file_tools.py": {
+    "mtime": 1787213571.0175545,
+    "ast_hash": "40e0c97a39ac096384ca683de4fb9ec3",
+    "semantic_hash": "40e0c97a39ac096384ca683de4fb9ec3"
+  },
+  "tests/acceptance/test_phase2_exit_criteria.py": {
+    "mtime": 1787213834.798407,
+    "ast_hash": "847177a90eef7a472c7579d86fc906c9",
+    "semantic_hash": "847177a90eef7a472c7579d86fc906c9"
+  },
+  "tests/security/test_file_scope.py": {
+    "mtime": 1787213661.2933683,
+    "ast_hash": "ac9eb13595a10fe1e3785e4c81db9ab2",
+    "semantic_hash": "ac9eb13595a10fe1e3785e4c81db9ab2"
+  },
+  "tests/security/test_injection_corpus.py": {
+    "mtime": 1787212329.9445074,
+    "ast_hash": "8882ae9b677315837ceadd8b8fd252e6",
+    "semantic_hash": "8882ae9b677315837ceadd8b8fd252e6"
+  },
+  "tests/ui/conftest.py": {
+    "mtime": 1787157196.936251,
+    "ast_hash": "dfdc02f7a46e08e5f18e3d33ca03ab29",
+    "semantic_hash": "dfdc02f7a46e08e5f18e3d33ca03ab29"
+  },
+  "tests/unit/test_file_tools.py": {
+    "mtime": 1787161899.3502295,
+    "ast_hash": "845ea0111cda95640a24df221655f17c",
+    "semantic_hash": "845ea0111cda95640a24df221655f17c"
+  },
+  "tests/unit/test_read_only_tools_prove_nothing.py": {
+    "mtime": 1787158460.8956962,
+    "ast_hash": "2e77c13923b5ca1e8de8dea78f54b308",
+    "semantic_hash": "2e77c13923b5ca1e8de8dea78f54b308"
+  },
+  "tests/unit/test_the_request_is_the_specification.py": {
+    "mtime": 1787160378.675748,
+    "ast_hash": "24dcec8da07b0b5e58150e281785a7c9",
+    "semantic_hash": "24dcec8da07b0b5e58150e281785a7c9"
+  },
+  "tests/unit/test_the_turn_finishes_the_job.py": {
+    "mtime": 1787162182.9010434,
+    "ast_hash": "860eb1cc09c9206839e20fc17754826b",
+    "semantic_hash": "860eb1cc09c9206839e20fc17754826b"
+  },
+  "docs/KNOWN_ISSUES.md": {
+    "mtime": 1787213436.216564,
+    "ast_hash": "63883019e1fe4dcda302612b4bb79827",
+    "semantic_hash": "63883019e1fe4dcda302612b4bb79827"
+  },
+  "docs/decisions/ADR-0033-a-turn-finishes-its-work.md": {
+    "mtime": 1787158620.7695336,
+    "ast_hash": "a226f9377aa7fe4a7f2c63b42354db57",
+    "semantic_hash": "a226f9377aa7fe4a7f2c63b42354db57"
+  },
+  "docs/decisions/ADR-0034-opening-a-file-with-an-approved-application.md": {
+    "mtime": 1787213470.3501687,
+    "ast_hash": "07cd84747e3c88c834efb89be7d1ede4",
+    "semantic_hash": "07cd84747e3c88c834efb89be7d1ede4"
   }
 }
