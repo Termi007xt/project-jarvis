@@ -1,28 +1,43 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-06 (Phase 2 stage 5 — finding files; turn continuation)
-- **Current branch:** `feat/PHASE-2-development`. Phase 1 **is already merged** —
-  `main` is at `b9e73e0`, merge of PR #2.
+- **Last updated:** 2026-08-06 — **Phase 2 closed.**
+- **Current branch:** `feat/PHASE-2-development`. Phase 1 is merged; `main` is at
+  `b9e73e0`. **Phase 2 is not yet merged** — see Next Exact Steps.
 - **Version:** `0.2.0.dev0`
-- **Active phase:** **Phase 2 — deterministic desktop and browser automation.**
-  **Stages 4 and 5 complete; phase closing.** 21 of 30 Phase 2 items done,
-  4 partial, 5 not started (BRW-03/05/07/09, WIN-01 — deferred or
-  descoped). Exit criteria: `tests/acceptance/test_phase2_exit_criteria.py`.
-  Plan: `docs/phase-plans/PHASE-02-PLAN.md`. Work items: `docs/BACKLOG.md` §5.
-- **Delivery mode:** **checkpoint after every stage** (decided 2026-08-04, and
-  deliberately *not* Phase 1's continuous run — see the plan §2.1/§2.2).
-- **Overall status:** Green. `python -m pytest` → **1488 passed, 4 skipped**,
-  exit 0; `python -m pytest -m "not slow"` → **1488 passed, 3 deselected** in
-  83s and opens no socket. `python -m jarvis.main --check` → exit 0, 17 tools,
-  15 applications. Nothing is blocked. Awaiting the owner's acceptance testing:
-  `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.21, §5.1–§5.3 and
-  **§C.1–§C.7 (the phase-closing list)**.
+- **Active phase:** **Phase 2 complete.** Report:
+  `docs/phase-reports/PHASE-02-DESKTOP-AND-BROWSER.md`. **Phase 3 has not
+  started**; its kickoff brief is `docs/PHASE-03-KICKOFF.md`.
+- **Overall status:** Green.
+  - `python -m pytest -m "not slow"` → **1488 passed, 4 skipped, 3 deselected**
+    (~83s, opens no socket). Use this while working.
+  - `python -m pytest tests/security` → **485 passed, 3 skipped**.
+  - `python -m pytest` (full) → downloads the wake models from GitHub; slower.
+  - `python -m jarvis.main --check` → exit 0, **18 tools**, 15 applications.
+- **Awaiting the owner:** acceptance list
+  `docs/PHASE-02-ACCEPTANCE-TESTING.md` **§C.1–§C.7**.
+- **Live defects and limitations:** `docs/KNOWN_ISSUES.md` — 13 open or worked
+  around. Read it before promising anything about the browser or YouTube Music.
 
 > **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
 > add another `-q` — two of them suppress pytest's final `N passed` line, which
-> looks alarmingly like a truncated crash and is not one. Run
-> `python -m pytest` bare.
+> looks alarmingly like a truncated crash and is not one.
+
+## Phase 2 is complete
+
+21 of 30 backlog items done, 4 partial, 5 not started — every one of the five
+named with a reason in the phase report §7, and none of them "we forgot".
+
+**What Jarvis can now do:** search YouTube and play a result by position; restart
+the browser so automation can attach; list, arrange, snap and move windows; say
+what the user is looking at; close an application and stop when it objects;
+force-close with fresh confirmation every time; photograph the screen visibly
+with blocklisted windows blacked out; and find, reveal and open files inside the
+folders Windows reports as the user's.
+
+**The theme of the phase was honesty, not capability.** Eight separate defects
+were the same mistake — a check that could not tell "I did this" from "this was
+already true". The corrections are structural and are now rules in `CLAUDE.md`.
 
 ### Phase 1 is accepted
 
@@ -613,6 +628,23 @@ and always-listening is safe to offer as a switch.
 
 ## Decisions Requiring Attention
 
+### 2026-08-20 — "Jarvis" is now a brand, and ADR-0011 says it is not
+
+Asked during `/impeccable init`, the owner chose to treat **"Jarvis" as a real
+product identity** — wordmark, iconography, voice — rather than a display string
+awaiting naming review, and accepted the trademark risk. They also confirmed the
+UI is to be designed **for the redistributable product**, not for this machine,
+and that a local web or companion surface is planned but does not exist.
+
+`PRD.md` §1.16, `CLAUDE.md` and **ADR-0011 all state the opposite**: internal
+codename only, until product naming and trademark review complete. Two documents
+now disagree, which is the condition ADRs exist to prevent. **ADR-0011 needs to
+be amended or superseded before any design work leans on the name.** Until then
+the name stays a single swappable token in code, whatever design does with it.
+
+Recorded in `PRODUCT.md` (new, root level) — the durable product record for
+design work. It captures no visual direction and replaces no existing document.
+
 ### Settled 2026-08-02 — recorded, do not re-litigate
 
 | # | Decision | Recorded in |
@@ -673,126 +705,27 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Start here (2026-08-06).** Stage 4 is code-complete and green (1279 passed, 2
-skipped, exit 0), and **the owner has not yet exercised any of part 2**. This
-phase has now found five times that a green suite says nothing about the seams,
-so acceptance comes before anything new. In order:
+**Phase 2 is code-complete and closed. Nothing is blocked.** In order:
 
-1. **Owner runs `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.16.** §4.12 is
-   the retry of their own Edge repro and is the one that matters: play something
-   in Edge that prompts on close, ask Jarvis to close it, and confirm it never
-   says "closed". §4.13 capture, §4.14 "what's on my screen", §4.15 the speech
-   logs.
+1. **The owner runs `docs/PHASE-02-ACCEPTANCE-TESTING.md` §C.1–§C.7.** Findings
+   go into `docs/KNOWN_ISSUES.md` or get fixed; do not start Phase 3 work on top
+   of an unaccepted phase without saying so.
 
-2. **Then close stage 4:** `graphify . --update`, phase notes, and the stage
-   commit.
+2. **Merge Phase 2 to `main`.** The branch has not been merged and Phase 1 was,
+   so `main` is a phase behind. Open the PR when acceptance passes.
 
-3. **Still open and deliberately not done:**
-   - `privacy.screenshot_retention` is not implemented; captures are only
-     bounded to the newest 20.
-   - Reading screen *contents* needs a vision model — Phase 4 (P4-VIS-01).
-   - The all-tabs-autoplay limitation under Playwright is still documented
-     rather than fixed; the single-tab CDP replacement is spiked and proven but
-     not applied.
-   - Sensitive-application acceptance testing is deferred by the owner (they use
-     none of those applications).
+3. **Then Phase 3.** Read `docs/PHASE-03-KICKOFF.md` first — it is written for a
+   session that has none of this conversation's context.
 
-**The earlier stage-3 steps below are superseded by acceptance, not cancelled.**
-
----
-
-### Superseded (2026-08-05)
-
-The six fixes above are committed and the suite is green, but **none of the
-browser path has been exercised end to end on real hardware since they landed**.
-In order:
-
-0. **Live-test the restart path.** With Brave open, ask for a YouTube search.
-   Expect: `youtube.search` fails `browser_restart_required` → the planner calls
-   `browser.restart` → one approval → Brave closes, reopens with tabs restored →
-   the search runs. Watch for three specific things: whether the planner
-   actually makes that second call (it has four rounds and has been observed to
-   narrate instead of acting), whether the tabs really come back, and whether
-   the new tab is dark. If the planner does not chain the calls, that is the
-   next defect and it is a planner problem, not a browser one.
-
-0a. **Then choose "Allow always"** at the approval prompt and confirm the next
-   several requests do not ask again. Check the Permissions screen lists it and
-   that revoking it there restores the prompt.
-
-0b. **Close the tab mid-session** and search again — it should open a new one
-   rather than failing.
-
-**Stages 0, 1 and 2 are complete. The rest of stage 3 — the exit criterion —
-follows.**
-
-1. **Stage 3 order:** P2-BRW-01 (the Jarvis profile — it already exists on the
-   machine, created by the stage 0 spike) → P2-BRW-02 (Playwright over CDP,
-   DOM-first, visible by default) → **P2-BRW-08, the exit criterion** →
-   P2-BRW-04 (CAPTCHA pause) → P2-BRW-03 (clear profile) → P2-BRW-09.
-
-2. **Every browser action runs inside an `AutomationSession`**
-   (`jarvis/toolbox/automation.py`). It is the only thing that hands out
-   permission to move anything, and a step that injects input must pass
-   `sends_input=True` or the watcher will read our own action as the user's and
-   pause the task for no visible reason.
-
-3. **Stage 3 consumes stage 1's boundary; do not build a second one.** The
-   browser adapter produces `ObservedList` / `Observation`
-   (`jarvis.core.observations`) and selects by ordinal. If a `find_by_title` or
-   similar appears anywhere, the injection defence has been undone —
-   `tests/security/test_prompt_injection.py` asserts structurally that no such
-   method exists. Stage 0 measured that YouTube results are index-addressable
-   (13 × `ytd-video-renderer` in DOM order), so this is known to work.
-
-4. **Do not let Playwright launch a browser.** Enforced by
-   `tests/security/test_browser_attach.py` (ADR-0031), but worth knowing rather
-   than discovering: launch through `jarvis.toolbox.launch.launch_argv` with a
-   `--remote-debugging-port` and attach with `connect_over_cdp`.
-
-5. **The first tool that moves the pointer settles an open measurement.** The
-   `UserInputWatcher` baseline may be read before Windows registers our
-   injection, making automation pause on its own action. Watch for automation
-   stopping with no user cause, and measure it against a real `SendInput`.
-
-6. **`succeeded` still requires verification.** Clicking the second result and
-   reporting success is `started ≠ running` wearing a new hat: playback is
-   `unverified` until player state is read back and the video id matches.
-
-7. **Deferred to stage 6, deliberately:** the time/date tool (gates nothing) and
-   the application-catalogue work (P2-WIN-01, behind its own ADR — Start-menu
-   discovery as the executable source, approval on first use, a `.lnk` parser
-   that runs nothing, care around the `powershell.exe` shortcut every Start menu
-   contains).
-
-8. **Outstanding for the owner, not blocking:** `docs/PHASE-02-ACCEPTANCE-TESTING.md`
-   §0.7 is the two-run test that would confirm the leading cause of the original
-   YouTube Music tab (Brave closed → app; Brave running → tab). One observation
-   settles it, and if it holds it changes how the Phase 2 application catalogue
-   must verify itself.
-
-6. **Graphify is stale and cannot update without an LLM API key.** `graphify .
-   --update` exits reporting `no LLM API key found`; 17 changed docs need
-   semantic extraction, including ADR-0027…ADR-0031 and this document. Set
-   `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`) as a **user
-   environment variable — never in the repo** — then re-run. `--code-only` was
-   deliberately not used: it may prune the existing doc nodes from a committed
-   `graph.json`. Nothing in the Phase 2 plan depends on the graph.
-
-### Carry these habits into Phase 2
-
-- **Test the seam, not just the unit.** Six acceptance rounds all found the same
-  class of defect: components that worked, connected to nothing. The rule that
-  caught them is worth restating — an enabled control either does something or
-  says why it cannot.
-- **Read the exit code.** A UI suite reported every assertion passing and
-  returned `0xC0000374`.
-- **Write the test named after the defect**, in the words the defect was
-  reported in. Every regression test added this phase is readable as an account
-  of what went wrong.
+**Do not start with:** BRW-09 (YouTube Music) unless the owner is free to have a
+browser opened on their desktop for selector measurement; BRW-05 or BRW-07,
+which are Phase 2 leftovers and should be scheduled deliberately rather than
+picked up by accident.
 
 ## Uncommitted or Temporary State
-Nothing uncommitted. Phase 1 is merged into `main` (`b9e73e0`, PR #2). Phase 2
+**`PRODUCT.md` is new and untracked** (2026-08-20, `/impeccable init`), along
+with this entry and the naming decision above. Nothing else is uncommitted.
+Phase 1 is merged into `main` (`b9e73e0`, PR #2). Phase 2
 work is on `feat/PHASE-2-development`. Nothing is stubbed to report false
 success; every unbuilt screen and menu entry still names its phase (ADR-0010).
 

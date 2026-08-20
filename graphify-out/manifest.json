@@ -915,9 +915,9 @@
     "semantic_hash": ""
   },
   "docs/PROJECT_STATE.md": {
-    "mtime": 1787211693.6665218,
-    "ast_hash": "72a1c5fa9eb58ec9bb74ebd4029d4ca8",
-    "semantic_hash": "72a1c5fa9eb58ec9bb74ebd4029d4ca8"
+    "mtime": 1787214799.4735224,
+    "ast_hash": "21684166b99a5fde960db7c3dfe3007e",
+    "semantic_hash": "21684166b99a5fde960db7c3dfe3007e"
   },
   "docs/decisions/ADR-0027-approval-and-activation-interaction-model.md": {
     "mtime": 1785825134.1709645,
@@ -960,9 +960,9 @@
     "semantic_hash": "9cf897cad2bc159bc553ee0594204528"
   },
   "CLAUDE.md": {
-    "mtime": 1785671380.2521772,
-    "ast_hash": "51520fd3f780fb73236780d62020b493",
-    "semantic_hash": "51520fd3f780fb73236780d62020b493"
+    "mtime": 1787214773.8118172,
+    "ast_hash": "2ec939e16cb907d449c1146677090a47",
+    "semantic_hash": "2ec939e16cb907d449c1146677090a47"
   },
   "src/jarvis/core/observations.py": {
     "mtime": 1785830942.0979288,
@@ -1263,5 +1263,20 @@
     "mtime": 1787213470.3501687,
     "ast_hash": "07cd84747e3c88c834efb89be7d1ede4",
     "semantic_hash": "07cd84747e3c88c834efb89be7d1ede4"
+  },
+  "PRODUCT.md": {
+    "mtime": 1787214751.881223,
+    "ast_hash": "c16168ec4ffe344417bcfadd54d51cb4",
+    "semantic_hash": "c16168ec4ffe344417bcfadd54d51cb4"
+  },
+  "docs/PHASE-03-KICKOFF.md": {
+    "mtime": 1787214846.0589907,
+    "ast_hash": "31a085e990dd8581fb1ae055571ff900",
+    "semantic_hash": "31a085e990dd8581fb1ae055571ff900"
+  },
+  "docs/phase-reports/PHASE-02-DESKTOP-AND-BROWSER.md": {
+    "mtime": 1787214745.2203178,
+    "ast_hash": "744c40e186411d121469507ec8e53b18",
+    "semantic_hash": "744c40e186411d121469507ec8e53b18"
   }
 }

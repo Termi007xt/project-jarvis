@@ -50,6 +50,22 @@ Violating any of these is a build failure, not a code-review comment.
   catalogue entry with a risk level — never widening an existing tool.
 - **`succeeded` requires verification.** `unverified` is a distinct outcome and
   never satisfies a task's success criteria.
+- **A check that cannot fail is not a check.** Before writing one, ask what it
+  would say if the action had done nothing. If the answer is "success", it is
+  not a check — it is a restatement. Every serious defect in Phase 2 was this:
+  a launch verified against "is the browser running" (it already was), a close
+  verified against a window list that omits hidden windows, an activate verified
+  against "not minimised". See `docs/phase-reports/PHASE-02-DESKTOP-AND-BROWSER.md` §4.
+- **A read-only tool may never report `verified`.** It changed nothing, so it
+  has nothing to verify; `Verification.NOT_APPLICABLE` is the honest answer.
+  `ToolInvoker` normalises this, because a rule enforced per tool is a rule the
+  next tool forgets. A verified listing once licensed "MS Edge has been closed".
+- **A success claim must be backed by a tool that could have performed *that*
+  action.** "Did any tool verify something?" is the wrong question — a verified
+  `app.open` once carried "and playing the current song".
+- **The user's request is the specification.** When deciding whether a turn is
+  finished, compare what they asked for against which tools actually ran. Four
+  attempts to catch the model's own wording failed, each on a new phrasing.
 - **Unbuilt features are shown disabled and name their phase** — never hidden,
   never stubbed to report success (ADR-0010).
 - Every external interaction declares a timeout; every retry loop a bound.
@@ -61,6 +77,29 @@ Violating any of these is a build failure, not a code-review comment.
 3. Write the test first for anything security- or state-related.
 4. Run the relevant suite, then the full suite, before claiming completion.
 5. Update `docs/PROJECT_STATE.md` at each checkpoint and before ending a session.
+
+### Habits this project paid for
+
+- **Test the seam, not just the unit.** Six times now a correct, unit-tested
+  mechanism has been wired to nothing, and every one passed its own tests
+  because it worked perfectly in isolation against nothing. Ask whether the
+  *assembled product* offers the thing.
+- **Read pytest's exit code, not just its summary line.** A run once returned
+  `0xC0000005` with no summary at all.
+- **Reproduce before fixing.** When a defect has several plausible causes,
+  instrument and measure rather than picking the likeliest. The 96-second
+  browser attach had three confident explanations and all three were wrong.
+- **Verify a test fails for the reason you think.** A test written for the
+  read-only verification bug passed against unfixed code, because `denied` and
+  `blocked` also carry `not_applicable`.
+- **Check paths and identifiers against the real machine** before writing them
+  down. Application paths, AUMIDs and DOM selectors are all things convention
+  gets wrong; `%USERPROFILE%\Documents` is wrong on a machine using OneDrive.
+- **A limitation that stops being written down stops being known.** Live
+  defects belong in `docs/KNOWN_ISSUES.md` with the stage they appeared at and
+  what was actually done — not in a commit message.
+- **Fast suite for iteration:** `python -m pytest -m "not slow"` (~80s, no
+  network). The three deselected tests really do download models.
 
 Never claim something works without having run it.
 
