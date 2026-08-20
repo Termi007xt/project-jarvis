@@ -1,19 +1,20 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-06 (Phase 2 stage 4 — window management, close, capture)
+- **Last updated:** 2026-08-06 (Phase 2 stage 5 — finding files; turn continuation)
 - **Current branch:** `feat/PHASE-2-development`. Phase 1 **is already merged** —
   `main` is at `b9e73e0`, merge of PR #2.
 - **Version:** `0.2.0.dev0`
 - **Active phase:** **Phase 2 — deterministic desktop and browser automation.**
-  **Stage 4 in progress** (P2-WIN-06 … P2-WIN-11, P2-APP-01, P2-APP-02).
+  **Stage 4 complete; stage 5 opened** (P2-FS-01, P2-FS-03, P2-FS-06 done).
   Plan: `docs/phase-plans/PHASE-02-PLAN.md`. Work items: `docs/BACKLOG.md` §5.
 - **Delivery mode:** **checkpoint after every stage** (decided 2026-08-04, and
   deliberately *not* Phase 1's continuous run — see the plan §2.1/§2.2).
-- **Overall status:** Green. `python -m pytest` → **1279 passed, 2 skipped**,
-  exit 0 (2026-08-06). `python -m jarvis.main --check` → exit 0. Nothing is
-  blocked. Stage 4 items awaiting the owner's acceptance testing are listed in
-  `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.16.
+- **Overall status:** Green. `python -m pytest` → **1339 passed, 4 skipped**,
+  exit 0; `python -m pytest -m "not slow"` → **1336 passed, 3 deselected** in
+  78s and opens no socket. `python -m jarvis.main --check` → exit 0, 17 tools,
+  15 applications. Nothing is blocked. Awaiting the owner's acceptance testing:
+  `docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.12–§4.21 and §5.1–§5.3.
 
 > **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
 > add another `-q` — two of them suppress pytest's final `N passed` line, which
