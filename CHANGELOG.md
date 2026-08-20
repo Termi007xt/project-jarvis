@@ -11,6 +11,18 @@ has shipped yet.
 
 ### Added
 
+- **Jarvis can find your files** (`files.find`, `files.reveal`, FR-190 … FR-193,
+  FR-208). It searches the folders Windows itself reports as yours — asked
+  through `SHGetKnownFolderPath`, not guessed as `%USERPROFILE%\Documents`,
+  which is wrong on any machine where Documents lives in OneDrive. Results come
+  back numbered, and "show me the second one" opens File Explorer with that file
+  selected. **Neither tool takes a path**: the model gets numbers and hands a
+  number back, so there is nothing for a malicious filename to redirect. Paths
+  are resolved to a real location before the approved-folder boundary is
+  checked, so `..`, environment variables, symlinks and junctions are all
+  compared by where they actually lead. It does not read what is inside a file —
+  that is a later phase, and nothing here pretends otherwise.
+
 - **Jarvis can photograph the screen, visibly** (`screen.capture`, FR-073,
   FR-271, FR-272). You are always shown that a capture is happening, and the
   notice is raised before the picture is taken rather than after. If nothing can

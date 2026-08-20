@@ -1245,6 +1245,70 @@ your messages.
 - **All your other YouTube tabs still start playing.** Known limitation from
   earlier, still documented, still not fixed.
 
+# Stage 5 — finding your files
+
+## 5.1 — Find a file ⭐ **new, start here**
+
+**Ask:** *"Jarvis, find my budget spreadsheet"* — or any file you actually have.
+
+Jarvis searches the folders **Windows itself** reports as yours: Desktop,
+Documents, Downloads, Pictures, Music, Videos, plus the Jarvis workspace. Not
+`%USERPROFILE%\Documents` guessed from convention — that is wrong on any machine
+where Documents lives in OneDrive, which is the default on a signed-in Windows
+11, so guessing would have been wrong on your machine.
+
+**You should hear:** a short list, numbered. Then:
+
+**Ask:** *"show me the second one"* — File Explorer should open with that file
+selected.
+
+**What it deliberately cannot do:**
+
+- **It cannot read what is inside a file.** Finding and pointing is this stage;
+  reading is a later one. If it ever summarises a document's contents, it is
+  inventing.
+- **It cannot be given a path.** `files.find` takes words, `files.reveal` takes a
+  number from the results. There is no parameter anywhere for a path — so a
+  malicious filename cannot redirect it, because there is nothing to redirect.
+- **It will not leave your folders.** `..`, `%VARIABLES%`, symlinks and junctions
+  are all resolved to a real location *before* the boundary is checked. A
+  path is compared by where it actually goes, never by how it is spelled.
+
+**Tell me:** if it finds nothing that obviously exists, or if a search takes more
+than about eight seconds (it stops there by design and says what it found).
+
+## 5.2 — What I did not build, and why
+
+You asked for two stages together. I built stage 5's core and left parts out
+rather than half-doing them:
+
+- **Reading and opening files** (P2-FS-05) needs a new kind of catalogue
+  argument — a file path handed to an approved application — which touches the
+  one process-creation rule the whole project is built on. That deserves its own
+  decision record, not a quiet extension at the end of a long session.
+- **The disambiguation dialog** (P2-FS-04) is UI work.
+- **Browser stage remainder** (clear profile, sourced research summaries,
+  AI-site prompting, YouTube Music done properly) — untouched. The YouTube Music
+  targeting bug you found sits in there, and it wants doing properly rather than
+  bolted on.
+
+## 5.3 — The suite is much lighter now
+
+You were right that it was heavy. Two findings:
+
+- **It was downloading the wake-word models from the internet** on every full
+  run — that is why timings swung between 90 and 234 seconds.
+- **My own new tests were sleeping**, paying the real one-second desktop settle
+  three times over.
+
+```powershell
+python -m pytest -m "not slow"     # 78s, no network at all
+python -m pytest                   # everything, downloads included
+```
+
+**You should see:** `1336 passed, 4 skipped, 3 deselected` for the fast run and
+`1339 passed, 4 skipped` for the full one.
+
 ## 4.16 — Confirm the suite
 
 ```powershell

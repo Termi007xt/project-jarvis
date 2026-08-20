@@ -83,6 +83,17 @@ def _conversation() -> Conversation:
     )
 
 
+def _engine(provider, invoker):
+    """An engine with the desktop-settle pause off.
+
+    `SETTLE_SECONDS` exists so a real application has time to put its window up
+    before the next step looks for it. Nothing here has a desktop, so paying it
+    was seven seconds of the suite sleeping — which the owner noticed as the
+    suite being heavy, and they were right.
+    """
+    return ConversationEngine(provider, invoker, settle_seconds=0.0)
+
+
 def _proposal(tool_id: str) -> ChatResponse:
     return ChatResponse(
         text="",
@@ -136,7 +147,7 @@ def test_the_turn_continues_after_a_promise_instead_of_ending() -> None:
     )
     invoker = RecordingInvoker()
 
-    turn = ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    turn = _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert "app.close" in invoker.invoked, (
         "the turn ended on 'I'll close it for you' without closing anything"
@@ -153,7 +164,7 @@ def test_a_claim_with_nothing_behind_it_is_also_pushed_back() -> None:
     )
     invoker = RecordingInvoker()
 
-    ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert "app.close" in invoker.invoked
 
@@ -196,7 +207,7 @@ def test_the_turn_carries_on_until_the_song_is_actually_played() -> None:
     )
     invoker = RecordingInvoker()
 
-    ConversationEngine(provider, invoker).ask(
+    _engine(provider, invoker).ask(
         _conversation(), "open YouTube Music and play whatever is in the queue"
     )
 
@@ -270,7 +281,7 @@ def test_a_failed_tool_does_not_end_the_turn() -> None:
     )
     invoker = FailThenSucceed("youtube.play", "Brave is already open")
 
-    ConversationEngine(provider, invoker).ask(
+    _engine(provider, invoker).ask(
         _conversation(), "play whatever is in the queue"
     )
 
@@ -302,7 +313,7 @@ def test_a_refused_permission_is_never_retried() -> None:
     )
     invoker = Denier()
 
-    ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert invoker.invoked == ["app.close"], (
         f"a refusal was retried: {invoker.invoked}"
@@ -326,7 +337,7 @@ def test_an_empty_reply_after_tools_carries_on_instead_of_explaining_itself() ->
         "There are six windows open, Sir.",
     )
 
-    turn = ConversationEngine(provider, RecordingInvoker()).ask(
+    turn = _engine(provider, RecordingInvoker()).ask(
         _conversation(), "what is open?"
     )
 
@@ -361,7 +372,7 @@ def test_a_model_that_only_ever_promises_still_stops() -> None:
     provider = ScriptedProvider("I'll close it for you.")  # forever
     invoker = RecordingInvoker()
 
-    turn = ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    turn = _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert provider.calls < 40, f"the turn did not stop: {provider.calls} model calls"
     assert turn.reply.strip(), "it gave up without saying anything"
@@ -371,7 +382,7 @@ def test_a_model_that_only_ever_promises_still_stops() -> None:
 def test_the_last_word_is_honest_when_it_never_managed_it() -> None:
     """After the pushing stops, the reply must not still be a promise."""
     provider = ScriptedProvider("I'll close it for you.")
-    turn = ConversationEngine(provider, RecordingInvoker()).ask(
+    turn = _engine(provider, RecordingInvoker()).ask(
         _conversation(), "close MS Edge"
     )
 
@@ -393,7 +404,7 @@ def test_a_finished_answer_is_not_pushed_back() -> None:
     )
     invoker = RecordingInvoker(verification=Verification.VERIFIED)
 
-    turn = ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    turn = _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert provider.calls == 2, f"a completed turn was pushed back ({provider.calls})"
     assert turn.ok
@@ -403,7 +414,7 @@ def test_an_ordinary_answer_is_not_pushed_back() -> None:
     """Conversation is not a task. "What's good bro?" must cost one call."""
     provider = ScriptedProvider("Not much, just here and ready to help.")
 
-    turn = ConversationEngine(provider, RecordingInvoker()).ask(
+    turn = _engine(provider, RecordingInvoker()).ask(
         _conversation(), "what's good bro?"
     )
 
@@ -438,7 +449,7 @@ def test_progress_resets_the_budget_so_a_long_task_is_not_cut_off() -> None:
     )
     invoker = RecordingInvoker()
 
-    ConversationEngine(provider, invoker).ask(
+    _engine(provider, invoker).ask(
         _conversation(), "open YouTube and play something"
     )
 
@@ -452,7 +463,7 @@ def test_a_stall_with_no_progress_still_stops() -> None:
     provider = ScriptedProvider("I'll close it for you.")  # forever, no tools
     invoker = RecordingInvoker()
 
-    ConversationEngine(provider, invoker).ask(_conversation(), "close MS Edge")
+    _engine(provider, invoker).ask(_conversation(), "close MS Edge")
 
     assert provider.calls <= MAX_TOOL_ROUNDS, (
         f"an unproductive turn ran past its bound: {provider.calls}"

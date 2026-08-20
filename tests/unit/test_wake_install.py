@@ -92,6 +92,7 @@ def test_nothing_present_is_not_installed(tmp_path: Path) -> None:
 
 
 # -- idempotence -----------------------------------------------------------
+@pytest.mark.slow  # really downloads the wake models
 def test_installing_twice_does_not_download_again(tmp_path: Path, monkeypatch) -> None:
     downloads: list[str] = []
 
@@ -169,6 +170,7 @@ def test_the_licence_is_stated_and_says_non_commercial() -> None:
     assert "never bundled" in LICENCE_WARNING
 
 
+@pytest.mark.slow  # really downloads the wake models
 def test_the_report_carries_the_licence_warning(tmp_path: Path, monkeypatch) -> None:
     make_files(tmp_path)
     monkeypatch.setattr(wake_install, "verify_detector_loads", lambda root: (True, None))
@@ -176,6 +178,7 @@ def test_the_report_carries_the_licence_warning(tmp_path: Path, monkeypatch) -> 
     assert any("NON-COMMERCIAL" in note for note in report.notes)
 
 
+@pytest.mark.slow  # really downloads the wake models
 def test_the_report_always_shows_the_destination(tmp_path: Path) -> None:
     report = install_wake_model(tmp_path)
     assert str(model_directory(tmp_path)) in report.describe()

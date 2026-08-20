@@ -71,6 +71,8 @@ from jarvis.toolbox.phase2_capture_tools import (
     ScreenCaptureTool,
     register_capture_tool,
 )
+from jarvis.toolbox.files import default_scope
+from jarvis.toolbox.phase2_file_tools import FileWorkspace, register_file_tools
 from jarvis.toolbox.phase2_window_tools import register_window_tools
 from jarvis.toolbox.window_actions import Win32ActionBackend, WindowController
 from jarvis.toolbox.windows import WindowDiscovery
@@ -326,6 +328,15 @@ class JarvisCore:
         # is the same window blacked out of an image. The indicator is left
         # unset: only a shell can show one, so `attach_shell` supplies it and
         # the tool does not exist until it does.
+        # 9e. files (Phase 2 stage 5). The scope is built once and shared, so
+        # the folders the search walks are the same ones `files.reveal` checks a
+        # position against — two scopes would drift and the second check would
+        # be against a boundary the first had never used.
+        self.file_workspace = FileWorkspace(
+            default_scope(getattr(self.config.storage, "workspace", ""))
+        )
+        register_file_tools(self.registry, self.file_workspace)
+
         self.capture_directory = default_capture_directory(self.paths.root)
         self.screen_capture = ScreenCapture(
             discovery=self.window_discovery, grab=gdi_screen_grab

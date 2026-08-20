@@ -288,6 +288,12 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # would not.
         "app.close",
         "app.force_close",
+        # Phase 2 stage 5 (P2-FS-02, P2-FS-03). Finding a file and pointing at
+        # it, inside the folders Windows itself reports as the user's — never a
+        # path from the model, and no way to read a file's contents, which is a
+        # later phase and is not quietly included here.
+        "files.find",
+        "files.reveal",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"
@@ -378,7 +384,13 @@ def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
         "screen.capture",
         "clipboard.read",
         "clipboard.write",
-        "fs.read_approved",
+        # `fs.read_approved` left this set in Phase 2 stage 5, when P2-FS-01,
+        # P2-FS-03 and P2-FS-06 built it together (FR-190, FR-192, FR-193,
+        # FR-208). Reading is the only half that exists: `files.find` searches
+        # the approved folders by name and `files.reveal` opens Explorer with a
+        # result selected. Neither reads what is *inside* a file, and neither
+        # takes a path — the model gets numbered results and hands a number
+        # back, so an injected instruction has nothing to name.
         "fs.write_approved",
         "fs.delete_or_overwrite",
         # `app.force_close` left this set in Phase 2 stage 4, when P2-APP-02

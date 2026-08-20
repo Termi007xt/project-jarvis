@@ -473,12 +473,12 @@ and recovery exist to back them.
 | P2-BRW-07 | AI website prompting adapter (Gemini/ChatGPT-class sites) | FR-055 | P2-BRW-01 | M | Not started |
 | P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Done |
 | P2-BRW-09 | YouTube Music search; ambiguous-match clarifying question | FR-092, FR-093 | P2-BRW-08 | M | Not started |
-| P2-FS-01 | Windows Known Folder resolution via Windows APIs | FR-190, AT-019 | P0-COR-04 | S | Not started |
-| P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Not started |
-| P2-FS-03 | Local file search in approved scope; match ranking | FR-192, FR-193 | P2-FS-01 | L | Not started |
+| P2-FS-01 | Windows Known Folder resolution via Windows APIs | FR-190, AT-019 | P0-COR-04 | S | Done |
+| P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Partial — reveal/select done; navigate, sort, filter not |
+| P2-FS-03 | Local file search in approved scope; match ranking | FR-192, FR-193 | P2-FS-01 | L | Done |
 | P2-FS-04 | Ambiguous-file disambiguation dialog | FR-194, AT-020 | P2-FS-03 | M | Not started |
 | P2-FS-05 | Open file (configured/default/user-selected app) with verification; worked example | FR-195, FR-207, FR-209, AT-021 | P2-FS-04 | M | Not started |
-| P2-FS-06 | Filesystem tool scoping and path validation (symlinks, junctions, env vars) | FR-208, FR-204, AT-022 | P2-FS-01 | L | Not started |
+| P2-FS-06 | Filesystem tool scoping and path validation (symlinks, junctions, env vars) | FR-208, FR-204, AT-022 | P2-FS-01 | L | Done |
 | P2-COR-01 | Honest-completion enforcement exercised against real verifiable actions | FR-048 (continued), AT-018 | P1-COR-02, P2-APP-01, P2-FS-05 | M | Not started |
 | P2-TST-01 | Phase 2 acceptance-test suite wiring | AT-004…AT-009, AT-018…AT-022, AT-031 | (all Phase 2 items) | M | Not started |
 

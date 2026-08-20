@@ -142,6 +142,31 @@ that change what the product can do:
 
 ## In Progress
 
+### 2026-08-06 — stage 5 opened: finding files
+
+P2-FS-01, P2-FS-03 and P2-FS-06 shipped together, because the first two are
+unsafe without the third. `files.find` searches the Windows Known Folders and
+`files.reveal` opens Explorer with a result selected. Neither takes a path: the
+model receives numbered results and hands a number back, which puts the
+injection defence in the signature rather than in a check that has to be
+remembered. Paths resolve before the boundary is compared, so `..`, environment
+variables, symlinks and junctions are judged by destination rather than
+spelling (`tests/security/test_file_scope.py`).
+
+**Left out deliberately, not forgotten.** P2-FS-05 (open a file with an approved
+application) needs a new catalogue argument kind — a file path passed to an
+approved binary — which touches ADR-0029, the one process-creation rule
+everything rests on. That wants its own ADR rather than a quiet extension.
+P2-FS-04 (disambiguation dialog) is UI work. The browser stage remainder
+(BRW-03/05/07/09) is untouched, and the YouTube Music targeting bug lives there.
+
+**The suite was downloading models from the internet.** Three wake-word tests
+call the real installer, which fetches from GitHub — the reason full-run timings
+swung between 90 and 234 seconds. They are marked `slow`; `pytest -m "not slow"`
+is 78s and opens no socket. Separately, the new turn tests were paying the real
+one-second desktop settle three times over, which is now injected as zero.
+
+
 ### 2026-08-06 late — a turn now finishes its work (ADR-0033)
 
 Three reports in one evening, one cause. The turn ended the moment the model
