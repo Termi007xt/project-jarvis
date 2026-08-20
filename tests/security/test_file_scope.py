@@ -182,3 +182,68 @@ def test_a_file_name_is_carried_as_data_not_instruction(
 
     assert observed.content_class.value == "file_name"
     assert all(item.handle.startswith("nth=") for item in observed.items)
+
+
+# =========================================================================
+# Opening a file cannot become running a program (ADR-0034)
+# =========================================================================
+def test_a_file_name_that_looks_like_a_flag_is_refused(tmp_path: Path) -> None:
+    """The whole of argv injection on Windows, in one case.
+
+    A file named `--profile-directory=Jarvis` handed to a browser stops being a
+    file name the moment `CreateProcess` parses the vector — it becomes an
+    option. Refused rather than escaped, because escaping is a claim about a
+    parser this code does not own.
+    """
+    from jarvis.toolbox.launch import CatalogueError, _validated_file_path
+
+    for hostile in ("--profile-directory=Jarvis", "/c", "-rf", "/select,C:\\"):
+        with pytest.raises(CatalogueError):
+            _validated_file_path(hostile)
+
+
+def test_a_relative_path_is_refused(tmp_path: Path) -> None:
+    """Resolved by the OS against a working directory nothing here controls."""
+    from jarvis.toolbox.launch import CatalogueError, _validated_file_path
+
+    with pytest.raises(CatalogueError):
+        _validated_file_path("notes.txt")
+
+
+def test_a_path_that_is_not_a_file_is_refused(tmp_path: Path) -> None:
+    """Opening is for files that exist; nothing here creates one."""
+    from jarvis.toolbox.launch import CatalogueError, _validated_file_path
+
+    with pytest.raises(CatalogueError):
+        _validated_file_path(str(tmp_path / "does-not-exist.txt"))
+    with pytest.raises(CatalogueError):
+        _validated_file_path(str(tmp_path))  # a directory
+
+
+def test_a_real_file_passes(tmp_path: Path) -> None:
+    from jarvis.toolbox.launch import _validated_file_path
+
+    real = tmp_path / "notes.txt"
+    real.write_text("x")
+    assert _validated_file_path(str(real)) == str(real)
+
+
+def test_an_entry_that_does_not_declare_file_path_never_receives_one() -> None:
+    """The argument kind is per entry, exactly as URL is.
+
+    Adding `FILE_PATH` must not make every catalogue entry willing to take a
+    path — that would turn the whole catalogue into a file-opening surface.
+    """
+    from jarvis.toolbox.launch import ArgumentKind, CatalogueError, build_argv
+    from jarvis.toolbox.launch import ApplicationEntry, LaunchKind
+
+    entry = ApplicationEntry(
+        app_id="steam",
+        display_name="Steam",
+        kind=LaunchKind.EXECUTABLE,
+        target=r"C:\Program Files (x86)\Steam\steam.exe",
+        argument_kind=ArgumentKind.STEAM_APP_ID,
+    )
+
+    with pytest.raises(CatalogueError):
+        build_argv(entry, r"C:\Users\someone\Documents\notes.txt")

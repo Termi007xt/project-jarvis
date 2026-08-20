@@ -90,6 +90,16 @@ has shipped yet.
   `permissions.always_allowable_capabilities`; no other medium-risk capability
   is affected and high-risk ones can never be listed.
 
+- **Jarvis can open a file** (`files.open`, FR-195, ADR-0034) — with an
+  application the user has already approved, never with the Windows default
+  association. That association is chosen by a registry the user's own software
+  rewrites, and several defaults (`.hta`, `.ps1`, `.scr`, `.url`) run code, so
+  "open with the default app" is a generic execution primitive wearing a helpful
+  name. A short table says which approved application opens which kind of file;
+  anything else is refused with a list of what *is* possible. A file whose name
+  begins with a dash or slash is refused rather than escaped — that is the whole
+  of argv injection, and escaping is a claim about a parser we do not own.
+
 ### Security
 
 - **Every untrusted surface is now exercised by the same adversarial corpus**

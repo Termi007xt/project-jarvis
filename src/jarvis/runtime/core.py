@@ -335,7 +335,7 @@ class JarvisCore:
         self.file_workspace = FileWorkspace(
             default_scope(getattr(self.config.storage, "workspace", ""))
         )
-        register_file_tools(self.registry, self.file_workspace)
+        register_file_tools(self.registry, self.file_workspace, self.applications)
 
         self.capture_directory = default_capture_directory(self.paths.root)
         self.screen_capture = ScreenCapture(

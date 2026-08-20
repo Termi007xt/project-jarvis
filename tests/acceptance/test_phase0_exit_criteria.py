@@ -294,6 +294,11 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         # later phase and is not quietly included here.
         "files.find",
         "files.reveal",
+        # Phase 2 stage 5 (P2-FS-05, ADR-0034). Opening a file means handing its
+        # path to an application already in the catalogue — never a default
+        # association, because that is chosen by a registry the user's software
+        # rewrites and several of the defaults run code.
+        "files.open",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"

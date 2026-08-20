@@ -477,7 +477,7 @@ and recovery exist to back them.
 | P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Partial — reveal/select done; navigate, sort, filter not |
 | P2-FS-03 | Local file search in approved scope; match ranking | FR-192, FR-193 | P2-FS-01 | L | Done |
 | P2-FS-04 | Ambiguous-file disambiguation dialog | FR-194, AT-020 | P2-FS-03 | M | Not started |
-| P2-FS-05 | Open file (configured/default/user-selected app) with verification; worked example | FR-195, FR-207, FR-209, AT-021 | P2-FS-04 | M | Not started |
+| P2-FS-05 | Open file (configured/default/user-selected app) with verification; worked example | FR-195, FR-207, FR-209, AT-021 | P2-FS-04 | M | Done — approved apps only (ADR-0034) |
 | P2-FS-06 | Filesystem tool scoping and path validation (symlinks, junctions, env vars) | FR-208, FR-204, AT-022 | P2-FS-01 | L | Done |
 | P2-COR-01 | Honest-completion enforcement exercised against real verifiable actions | FR-048 (continued), AT-018 | P1-COR-02, P2-APP-01, P2-FS-05 | M | Not started |
 | P2-TST-01 | Phase 2 acceptance-test suite wiring | AT-004…AT-009, AT-018…AT-022, AT-031 | (all Phase 2 items) | M | Not started |

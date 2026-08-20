@@ -106,6 +106,11 @@ class ArgumentKind(str, Enum):
     #: and the model never sees or supplies it, so constraint 3 is untouched —
     #: the model still names an entry, never a binary and never a port.
     DEBUG_PORT = "debug_port"
+    #: An existing file, opened with this application (ADR-0034). The engine
+    #: resolves it through `FileScope` before it gets here, so a path that
+    #: reaches this point came from a search inside folders the user approved.
+    #: The model never supplies one — it names a position in a search result.
+    FILE_PATH = "file_path"
 
 
 #: Ports the OS hands out for ephemeral use. A debugging port must be one of
@@ -255,7 +260,39 @@ def _validate_argument(entry: ApplicationEntry, argument: str | None) -> list[st
             )
         return [f"--remote-debugging-port={argument}"]
 
+    if entry.argument_kind is ArgumentKind.FILE_PATH:
+        return [_validated_file_path(argument)]
+
     raise CatalogueError(f"unhandled argument kind {entry.argument_kind}")  # pragma: no cover
+
+
+def _validated_file_path(argument: str) -> str:
+    """Constraint 5 for a file path (ADR-0034).
+
+    Three checks, and the third is the one that matters. A leading `-` or `/`
+    turns an argument into an **option**: a file innocently named
+    `--profile-directory=Jarvis` handed to a browser stops being a file name at
+    the moment `CreateProcess` parses the vector. Refused rather than escaped,
+    because escaping is a claim about a parser this code does not own.
+    """
+    candidate = Path(argument)
+
+    if candidate.name.startswith(("-", "/")) or argument.startswith(("-", "/")):
+        raise CatalogueError(
+            f"'{argument}' starts with a dash or a slash, so it would be read "
+            "as an option rather than as a file. Refused."
+        )
+    if not candidate.is_absolute():
+        raise CatalogueError(
+            f"'{argument}' is not an absolute path. A relative one is resolved "
+            "against a working directory nothing here controls."
+        )
+    if not candidate.is_file():
+        raise CatalogueError(
+            f"'{argument}' is not an existing file. Opening is for files that "
+            "are already there; nothing here creates one."
+        )
+    return str(candidate)
 
 
 def build_argv(entry: ApplicationEntry, argument: str | None = None) -> tuple[str, ...]:
