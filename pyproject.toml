@@ -35,6 +35,23 @@ voice = [
     "kokoro>=0.9.4",
     "openwakeword>=0.6",
 ]
+# Phase 2 desktop and browser automation. Optional for the same reasons the
+# voice extra is: CI runs on Linux with no desktop and no browser, and the
+# engine must still import and report an honest unavailable state without these
+# (ADR-0010, NFR-014). Every provider imports them lazily.
+#
+# Playwright is a *client* here, never a launcher — Brave is started through the
+# single authorised call site in jarvis.toolbox.launch and Playwright attaches
+# over CDP (ADR-0029, ADR-0031). Installing it does not install a browser, and
+# `playwright install` is deliberately not run: the product drives the user's
+# real Brave, not a bundled Chromium.
+#
+# pywinauto is Windows-only by nature; the marker keeps `pip install -e
+# ".[automation]"` working on the Linux CI runner that enforces the layering.
+automation = [
+    "playwright>=1.49",
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
+]
 
 [project.scripts]
 jarvis = "jarvis.main:main"

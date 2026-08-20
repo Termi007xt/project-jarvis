@@ -44,15 +44,28 @@ def recorded_launches(monkeypatch):
     """Capture argv instead of starting anything, and control verification."""
     calls: list[tuple[str, ...]] = []
     state = {"running": True}
+    launched = {"yet": False}
 
     def fake_launch_argv(argv):
         calls.append(tuple(argv))
+        launched["yet"] = True
         return 4242
 
+    def fake_process_running(_names):
+        # Nothing is running *before* the launch. That is what makes the
+        # observation afterwards evidence rather than coincidence.
+        #
+        # This fixture previously reported the process as running from the
+        # start, which modelled a machine where the application was already
+        # open — and under that model a launch "verified" itself by observing
+        # something it had not caused. That is the defect behind "Open YouTube
+        # Music opens a tab" still recording succeeded/verified.
+        if not launched["yet"]:
+            return False
+        return state["running"]
+
     monkeypatch.setattr(launch_module, "launch_argv", fake_launch_argv)
-    monkeypatch.setattr(
-        launch_module, "process_running", lambda names: state["running"]
-    )
+    monkeypatch.setattr(launch_module, "process_running", fake_process_running)
     return calls, state
 
 

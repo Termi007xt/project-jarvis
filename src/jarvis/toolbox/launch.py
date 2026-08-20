@@ -101,6 +101,22 @@ class ArgumentKind(str, Enum):
     NONE = "none"
     URL = "url"
     STEAM_APP_ID = "steam_app_id"
+    #: An ephemeral CDP port for browser automation (ADR-0031). The catalogue
+    #: entry fixes that the entry accepts *a port*; the engine picks the number
+    #: and the model never sees or supplies it, so constraint 3 is untouched —
+    #: the model still names an entry, never a binary and never a port.
+    DEBUG_PORT = "debug_port"
+    #: An existing file, opened with this application (ADR-0034). The engine
+    #: resolves it through `FileScope` before it gets here, so a path that
+    #: reaches this point came from a search inside folders the user approved.
+    #: The model never supplies one — it names a position in a search result.
+    FILE_PATH = "file_path"
+
+
+#: Ports the OS hands out for ephemeral use. A debugging port must be one of
+#: these and never a well-known number: a fixed port would be a predictable,
+#: standing control channel on the user's browser (ADR-0031).
+EPHEMERAL_PORT_RANGE = (1024, 65535)
 
 
 @dataclass(frozen=True)
@@ -127,11 +143,11 @@ class ApplicationEntry:
     aliases: tuple[str, ...] = field(default_factory=tuple)
 
     def matches(self, name: str) -> bool:
-        lowered = name.strip().casefold()
-        return lowered in {
-            self.app_id.casefold(),
-            self.display_name.casefold(),
-            *(alias.casefold() for alias in self.aliases),
+        wanted = _normalise_name(name)
+        return wanted in {
+            _normalise_name(self.app_id),
+            _normalise_name(self.display_name),
+            *(_normalise_name(alias) for alias in self.aliases),
         }
 
 
@@ -148,6 +164,18 @@ class LaunchOutcome:
 
 def _basename(target: str) -> str:
     return Path(target).name.casefold()
+
+
+def _normalise_name(name: str) -> str:
+    """Fold the separators a model guesses between, and nothing else.
+
+    "youtube-music", "youtube_music" and "YouTube  Music" are one intention
+    spelled three ways, and refusing two of them as `unknown_application` turns
+    a correct request into a dead end. This widens *spelling*, never scope: an
+    entry is still found only by its id, display name or declared aliases, and
+    never by a path (ADR-0029 constraint 3).
+    """
+    return re.sub(r"[\s_-]+", " ", name.strip().casefold())
 
 
 def validate_entry(entry: ApplicationEntry) -> None:
@@ -185,9 +213,15 @@ def _validate_argument(entry: ApplicationEntry, argument: str | None) -> list[st
     """Constraint 5: validate the caller's argument against the entry's type."""
     if entry.argument_kind is ArgumentKind.NONE:
         if argument:
+            # ADR-0010: name what is not possible *and* what is. "Does not take
+            # an argument" left "play Sunflower on YouTube Music" with no next
+            # move, and invited the model to retry the identical call.
             raise CatalogueError(
                 f"'{entry.app_id}' does not take an argument, so '{argument}' "
-                "was refused rather than passed through."
+                f"was refused rather than passed through. Jarvis can open "
+                f"{entry.display_name}, but it cannot search for or choose "
+                "content inside it yet — that needs browser automation, which "
+                "is not built."
             )
         return []
 
@@ -215,7 +249,50 @@ def _validate_argument(entry: ApplicationEntry, argument: str | None) -> list[st
             raise CatalogueError(f"'{argument}' is not a Steam app id")
         return [argument]
 
+    if entry.argument_kind is ArgumentKind.DEBUG_PORT:
+        low, high = EPHEMERAL_PORT_RANGE
+        if not argument.isdigit() or not (low <= int(argument) <= high):
+            raise CatalogueError(
+                f"'{argument}' is not a usable debugging port. It must be a "
+                f"number between {low} and {high}, chosen per session — a fixed "
+                "port would leave a predictable control channel open on the "
+                "browser (ADR-0031)."
+            )
+        return [f"--remote-debugging-port={argument}"]
+
+    if entry.argument_kind is ArgumentKind.FILE_PATH:
+        return [_validated_file_path(argument)]
+
     raise CatalogueError(f"unhandled argument kind {entry.argument_kind}")  # pragma: no cover
+
+
+def _validated_file_path(argument: str) -> str:
+    """Constraint 5 for a file path (ADR-0034).
+
+    Three checks, and the third is the one that matters. A leading `-` or `/`
+    turns an argument into an **option**: a file innocently named
+    `--profile-directory=Jarvis` handed to a browser stops being a file name at
+    the moment `CreateProcess` parses the vector. Refused rather than escaped,
+    because escaping is a claim about a parser this code does not own.
+    """
+    candidate = Path(argument)
+
+    if candidate.name.startswith(("-", "/")) or argument.startswith(("-", "/")):
+        raise CatalogueError(
+            f"'{argument}' starts with a dash or a slash, so it would be read "
+            "as an option rather than as a file. Refused."
+        )
+    if not candidate.is_absolute():
+        raise CatalogueError(
+            f"'{argument}' is not an absolute path. A relative one is resolved "
+            "against a working directory nothing here controls."
+        )
+    if not candidate.is_file():
+        raise CatalogueError(
+            f"'{argument}' is not an existing file. Opening is for files that "
+            "are already there; nothing here creates one."
+        )
+    return str(candidate)
 
 
 def build_argv(entry: ApplicationEntry, argument: str | None = None) -> tuple[str, ...]:
@@ -339,6 +416,17 @@ def launch(
     process is actually observed.
     """
     argv = build_argv(entry, argument)
+
+    # Observed *before* starting anything, because otherwise this check cannot
+    # tell "my effect happened" from "something unrelated was already true".
+    # `youtube_music` verifies against `brave.exe`, and Brave is usually already
+    # open, so every launch reported verified success while nothing about the
+    # effect had been observed — including the launches that opened a tab
+    # instead of the app.
+    already_running = bool(entry.verify_process_names) and process_running(
+        entry.verify_process_names
+    )
+
     try:
         pid = launch_argv(argv)
     except OSError as exc:
@@ -354,6 +442,23 @@ def launch(
             detail=(
                 f"started {entry.display_name}, but the catalogue entry declares "
                 "no process to verify against, so the effect is unconfirmed."
+            ),
+        )
+
+    if already_running:
+        # Honest, and deliberately not downgraded to a warning: this launch
+        # cannot be confirmed by process presence, because the process was
+        # there first. Confirming it needs a *window*, which is UI Automation
+        # (P2-WIN-08). Until then this is `unverified`, which by design does
+        # not satisfy a task's success criteria (PRD FR-048, AT-018).
+        return LaunchOutcome(
+            started=True, verified=False, pid=pid, argv=argv,
+            detail=(
+                f"{entry.display_name} was asked to start, but "
+                f"{', '.join(entry.verify_process_names)} was already running "
+                "before this action, so seeing it now is no evidence the action "
+                "did anything. Reporting this as unverified rather than as "
+                "success."
             ),
         )
 
@@ -463,6 +568,103 @@ def default_catalogue(config: object | None = None) -> ApplicationCatalogue:
                 ),
                 verify_process_names=("brave.exe",),
                 aliases=("youtube music", "music", "yt music", "ytmusic"),
+            ),
+            # -- everyday applications ------------------------------------
+            #
+            # Added 2026-08-06 at the owner's request: "pls add all low-med risk
+            # apps in approved, i dont want to be so limited in testing".
+            #
+            # This widens the *catalogue*, which is the thing ADR-0029 built to
+            # be widened — entries are fixed argument vectors the owner approves,
+            # and every one still goes through the single `launch_argv` call
+            # site, the interpreter denylist and the same permission check. It
+            # does not widen what Jarvis may execute: there is still no way to
+            # name a binary that is not an entry here.
+            #
+            # Every path and AUMID below was checked against this machine before
+            # being written down, rather than guessed from convention.
+            ApplicationEntry(
+                app_id="edge",
+                display_name="Microsoft Edge",
+                kind=LaunchKind.EXECUTABLE,
+                target=rf"{program_files_x86}\Microsoft\Edge\Application\msedge.exe",
+                argument_kind=ArgumentKind.URL,
+                verify_process_names=("msedge.exe",),
+                aliases=("ms edge", "edge browser", "microsoft edge"),
+            ),
+            ApplicationEntry(
+                app_id="notepad",
+                display_name="Notepad",
+                kind=LaunchKind.EXECUTABLE,
+                target=r"C:\Windows\System32\notepad.exe",
+                verify_process_names=("notepad.exe",),
+                aliases=("note pad",),
+            ),
+            ApplicationEntry(
+                app_id="file_explorer",
+                display_name="File Explorer",
+                kind=LaunchKind.EXECUTABLE,
+                target=r"C:\Windows\explorer.exe",
+                verify_process_names=("explorer.exe",),
+                aliases=("explorer", "files", "my computer", "this pc"),
+            ),
+            ApplicationEntry(
+                app_id="discord",
+                display_name="Discord",
+                kind=LaunchKind.EXECUTABLE,
+                # Discord installs each version into its own `app-x.y.z` folder,
+                # so the versioned executable is not a stable target. `Update.exe
+                # --processStart` is the shortcut's own vector and survives an
+                # update; the arguments are fixed here, not composed by anyone.
+                target=os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""), "Discord", "Update.exe"
+                ),
+                fixed_arguments=("--processStart", "Discord.exe"),
+                verify_process_names=("Discord.exe",),
+                aliases=("discord app",),
+            ),
+            ApplicationEntry(
+                app_id="whatsapp",
+                display_name="WhatsApp",
+                kind=LaunchKind.STORE_APP,
+                target="5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+                verify_process_names=("WhatsApp.exe", "WhatsApp.Root.exe"),
+                aliases=("whats app", "whatsapp desktop"),
+            ),
+            ApplicationEntry(
+                app_id="settings",
+                display_name="Settings",
+                kind=LaunchKind.STORE_APP,
+                target=(
+                    "windows.immersivecontrolpanel_cw5n1h2txyewy"
+                    "!microsoft.windows.immersivecontrolpanel"
+                ),
+                verify_process_names=("SystemSettings.exe",),
+                aliases=("windows settings", "system settings"),
+            ),
+            ApplicationEntry(
+                app_id="camera",
+                display_name="Camera",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+                verify_process_names=("WindowsCamera.exe",),
+                aliases=("webcam",),
+            ),
+            ApplicationEntry(
+                app_id="microsoft_store",
+                display_name="Microsoft Store",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsStore_8wekyb3d8bbwe!App",
+                verify_process_names=("WinStore.App.exe",),
+                aliases=("ms store", "store", "app store"),
+            ),
+            ApplicationEntry(
+                app_id="calculator",
+                display_name="Calculator",
+                kind=LaunchKind.STORE_APP,
+                target="Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+                verify_process_names=("CalculatorApp.exe", "Calculator.exe"),
+                aliases=("calc",),
             ),
             ApplicationEntry(
                 app_id="xbox",

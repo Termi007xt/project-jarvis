@@ -252,12 +252,109 @@ def test_exit_6_the_registered_tool_set_is_narrow(core: JarvisCore) -> None:
         "media.control",
         "device.volume",
         "voice.speak",
+        # Phase 2, PRD section 21's exit criterion: "search RTX 5070 on YouTube
+        # and play the second video" is two utterances, so it is two tools.
+        # `youtube.play` takes a *position*, never a title — the injection
+        # defence written into a signature rather than into a rule.
+        "youtube.search",
+        "youtube.play",
+        # Added 2026-08-05 (ADR-0032). Brave cannot be given an automation port
+        # while it is running, so a browser Jarvis had opened itself made its
+        # own next step impossible — and the only way out was the owner quitting
+        # Brave by hand, which they did three times in four minutes. Its own
+        # tool and its own capability rather than folded into `youtube.search`:
+        # approving a search is not approving the loss of someone's windows.
+        "browser.restart",
+        # Phase 2 stage 4 (P2-WIN-08, P2-WIN-09). Two tools, not one, because
+        # reading which windows are open and taking the foreground away from
+        # what the owner is doing are different risks — `window.list` is low and
+        # holds no lock, `window.arrange` is medium and owns the desktop first.
+        # `window.arrange` takes a position from the listing and has no title
+        # parameter at all, so a window cannot retarget an action by renaming
+        # itself.
+        "window.list",
+        "window.arrange",
+        # Phase 2 stage 4 (P2-WIN-11, FR-270 in part). "What's on my screen"
+        # answered honestly: it names the window in front and says plainly that
+        # Jarvis cannot read what is inside it, because reading pixels needs the
+        # vision support that is Phase 4. Low risk and holds no lock — it asks
+        # the OS which window has focus and changes nothing.
+        "screen.active_window",
+        # Phase 2 stage 4 (P2-APP-01, P2-APP-02). Two tools, and the split is
+        # the whole control: `app.close` asks, the way clicking the X asks, and
+        # stops when the application raises a save prompt. `app.force_close`
+        # discards that work, and reaching it has to be a decision a person
+        # makes — which a separate tool requires and a `force=True` parameter
+        # would not.
+        "app.close",
+        "app.force_close",
+        # Phase 2 stage 5 (P2-FS-02, P2-FS-03). Finding a file and pointing at
+        # it, inside the folders Windows itself reports as the user's — never a
+        # path from the model, and no way to read a file's contents, which is a
+        # later phase and is not quietly included here.
+        "files.find",
+        "files.reveal",
+        # Phase 2 stage 5 (P2-FS-05, ADR-0034). Opening a file means handing its
+        # path to an application already in the catalogue — never a default
+        # association, because that is chosen by a registry the user's software
+        # rewrites and several of the defaults run code.
+        "files.open",
     }
     assert registered == expected, (
         "the registered tool set has drifted from what the phases declare"
     )
+
+    # The invariant is no longer "everything is low risk" — Phase 2's browser
+    # automation drives a profile that may hold live logins, and PRD section
+    # 11.1 classes that as medium, so pretending otherwise would be the
+    # dishonesty this test exists to prevent.
+    #
+    # Phase 2 stage 4 added the first HIGH tool, `app.force_close` (FR-067,
+    # AT-005). It is named here one at a time rather than the check being
+    # relaxed to "high is allowed now": deletion, elevation, installing software
+    # and sending messages are all still unbuilt, and the value of this test is
+    # entirely in none of them arriving unannounced.
+    high_risk_by_design = {"app.force_close"}
     for spec in specs:
-        assert spec.risk is RiskLevel.LOW, f"{spec.tool_id} is not low risk"
+        if spec.tool_id in high_risk_by_design:
+            assert spec.risk is RiskLevel.HIGH, (
+                f"{spec.tool_id} is listed as high-risk by design but declares "
+                f"{spec.risk.value}; losing unsaved work is not a medium-risk act"
+            )
+            continue
+        assert spec.risk in (RiskLevel.LOW, RiskLevel.MEDIUM), (
+            f"{spec.tool_id} is {spec.risk.value}; no phase has asked for a "
+            "high-risk or prohibited tool beyond "
+            f"{sorted(high_risk_by_design)}"
+        )
+
+
+def test_exit_6_the_shell_backed_tools_appear_only_with_a_shell(
+    core: JarvisCore,
+) -> None:
+    """Two tools exist only when something can show the user what happened.
+
+    `notify.show` has nothing to draw on without a shell. `screen.capture` is
+    the stronger case: Jarvis does not photograph the screen without showing
+    that it is happening (FR-271), so with no indicator there is no capture tool
+    at all — not one that registers and then refuses every call.
+
+    Asserted here, at the level of the assembled application, because the whole
+    point of the arrangement is what the *running product* offers. A capture
+    core with perfect controls that nothing can reach is the failure this phase
+    has already made four times.
+    """
+    assert core.registry.get("screen.capture") is None, (
+        "screen.capture exists with nothing able to show a capture indicator"
+    )
+
+    registered = core.attach_shell(
+        lambda _title, _message: True, lambda _message: None
+    )
+
+    assert "notify.show" in registered
+    assert "screen.capture" in registered
+    assert core.registry.get("screen.capture") is not None
 
 
 def test_exit_6_a_state_changing_tool_must_declare_how_it_verifies(
@@ -281,20 +378,41 @@ def test_exit_6_the_planner_is_offered_only_registered_tools(core: JarvisCore) -
 def test_no_capability_requiring_input_screen_or_filesystem_access_is_wired(
     core: JarvisCore,
 ) -> None:
-    forbidden_in_phase_0 = {
+    # `browser.automate_logged_in` left this set in Phase 2, when the browser
+    # tools it names were actually built (ADR-0019, ADR-0031). Everything else
+    # is still unbuilt, and the point of keeping the list rather than deleting
+    # the test is that none of these may arrive unannounced — `input.automate`
+    # in particular, because Phase 2 stage 2 built the *permission* to move the
+    # pointer and no tool has been given it yet.
+    still_unbuilt = {
         "input.automate",
         "screen.capture",
         "clipboard.read",
         "clipboard.write",
-        "fs.read_approved",
+        # `fs.read_approved` left this set in Phase 2 stage 5, when P2-FS-01,
+        # P2-FS-03 and P2-FS-06 built it together (FR-190, FR-192, FR-193,
+        # FR-208). Reading is the only half that exists: `files.find` searches
+        # the approved folders by name and `files.reveal` opens Explorer with a
+        # result selected. Neither reads what is *inside* a file, and neither
+        # takes a path — the model gets numbered results and hands a number
+        # back, so an injected instruction has nothing to name.
         "fs.write_approved",
         "fs.delete_or_overwrite",
-        "browser.automate_logged_in",
-        "app.force_close",
+        # `app.force_close` left this set in Phase 2 stage 4, when P2-APP-02
+        # built it (FR-067, AT-005). It is the first high-risk tool in the
+        # product, and it earns that by being the only way to lose unsaved work
+        # on purpose: fresh confirmation every time, no standing grant ever, and
+        # deliberately a separate tool from `app.close` so that reaching it is
+        # something a person decides rather than a parameter a model sets.
         "system.elevate",
     }
     for spec in core.registry.specs():
-        assert not (set(spec.required_capabilities) & forbidden_in_phase_0)
+        wired = set(spec.required_capabilities) & still_unbuilt
+        assert not wired, (
+            f"{spec.tool_id} requires {sorted(wired)}, which no completed phase "
+            "has built. If a phase has now built it, say so here rather than "
+            "removing the check."
+        )
 
 
 def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> None:
@@ -314,15 +432,69 @@ def test_no_screenshot_or_input_automation_module_exists(repo_root: Path) -> Non
     banned_imports = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
     for path in package.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
+        # Module scope only, deliberately not `ast.walk` — same reasoning, and
+        # the same implementation, as
+        # `tests/security/test_lazy_audio_imports.py`. Phase 2 legitimately uses
+        # pywinauto and playwright behind the `automation` extra, exactly as
+        # Phase 1 uses the voice stack behind the `voice` extra, and a lazy
+        # import inside a function is what makes that work. Scanning the whole
+        # tree would have banned the sanctioned pattern along with the
+        # unsanctioned one, which is stricter than this test's own stated rule.
+        scoped: list[ast.AST] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                scoped.append(node)
+            elif isinstance(node, ast.If):
+                # A module-level `if` (a TYPE_CHECKING guard, say) still runs.
+                scoped.extend(ast.walk(node))
+
+        for node in scoped:
             names: list[str] = []
             if isinstance(node, ast.Import):
                 names = [alias.name.split(".")[0] for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module.split(".")[0]]
             assert not (set(names) & banned_imports), (
-                f"{path.name} imports a computer-control library: {set(names) & banned_imports}"
+                f"{path.name} imports a computer-control library at module "
+                f"scope: {set(names) & banned_imports}. Import it inside the "
+                "function that needs it, so the engine still imports on Linux "
+                "with nothing installed (ARCHITECTURE §11)."
             )
+
+
+def test_the_computer_control_scanner_still_catches_a_violation() -> None:
+    """A scan that was just narrowed must be shown to still detect something.
+
+    The check above was widened from "any import anywhere" to "any import at
+    module scope" when Phase 2 gave pywinauto a legitimate lazy use. A narrowing
+    that goes too far produces a test that passes because it inspects nothing,
+    which is the failure mode this project keeps meeting — so this proves the
+    scanner still bites, and that the sanctioned pattern still passes.
+    """
+    banned = {"mss", "pyautogui", "pywinauto", "playwright", "PIL", "cv2"}
+
+    def module_scope_hits(source: str) -> set[str]:
+        tree = ast.parse(source)
+        scoped: list[ast.AST] = []
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                scoped.append(node)
+            elif isinstance(node, ast.If):
+                scoped.extend(ast.walk(node))
+        found: set[str] = set()
+        for node in scoped:
+            if isinstance(node, ast.Import):
+                found |= {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                found.add(node.module.split(".")[0])
+        return found & banned
+
+    assert module_scope_hits("import pywinauto\n") == {"pywinauto"}
+    assert module_scope_hits("from playwright.sync_api import sync_playwright\n") == {"playwright"}
+    assert module_scope_hits("if TYPE_CHECKING:\n    import pywinauto\n") == {"pywinauto"}
+
+    # The sanctioned pattern: lazy, inside the function that needs it.
+    assert module_scope_hits("def go():\n    import pywinauto\n    return pywinauto\n") == set()
 
 
 # =========================================================================

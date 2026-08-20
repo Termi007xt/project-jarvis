@@ -122,10 +122,53 @@ class VoiceService:
             on_state=on_state,
             on_level=on_level,
             # ADR-0016 criterion 2: never on until enrolment has been measured.
-            always_listening=bool(wake_settings.always_listening and wake_settings.enrolled),
+            # Not gated on `enrolled` any more, and the gate was the reason
+            # turning always-listening on had no effect: enrolment is the
+            # deferred half of ADR-0016 (the personal verifier and its recording
+            # flow were never built), so `enrolled` is always false and the
+            # setting could never take.
+            #
+            # Enrolment was never a prerequisite for this. What ships is the
+            # pretrained "Hey Jarvis" model, which needs no enrolment and was
+            # measured during Phase 1 acceptance — 0.994–0.998 on the phrase,
+            # and no false wakes across extended ordinary conversation. A
+            # personal verifier would sit *on top* of that as an improvement,
+            # not underneath it as a precondition.
+            always_listening=bool(wake_settings.always_listening),
         )
 
     # -- status ------------------------------------------------------------
+    def preload(self) -> dict[str, str]:
+        """Load the speech models now, so the first command is not the slow one.
+
+        Both providers load lazily, which is right for import time and wrong for
+        the first thing the user says — the wait landed on them rather than on
+        start-up. `FasterWhisperSttProvider.load` has said "call it from a
+        worker at start-up" since Phase 1 and nothing ever did.
+
+        Returns what happened per component, so a failure to warm is reported
+        rather than swallowed. It never raises: a model that will not preload
+        still loads on first use, more slowly, and that is a degradation rather
+        than a failure (ADR-0010).
+        """
+        outcome: dict[str, str] = {}
+        for name, provider in (("tts", self.tts), ("stt", self.stt)):
+            load = getattr(provider, "load", None)
+            if load is None:
+                outcome[name] = "no preload needed"
+                continue
+            if not getattr(provider, "available", False):
+                reason = getattr(provider, "unavailable_reason", lambda: None)()
+                outcome[name] = f"unavailable: {reason or 'not installed'}"
+                continue
+            try:
+                load()
+                outcome[name] = "loaded"
+            except Exception as exc:  # noqa: BLE001 - warming must not break start-up
+                _LOG.warning("could not preload %s: %s", name, exc)
+                outcome[name] = f"failed: {exc}"
+        return outcome
+
     def status(self) -> VoiceStatus:
         wake_settings = self._config.audio.wake_word  # type: ignore[attr-defined]
         return VoiceStatus(

@@ -1,14 +1,43 @@
 # Project State
 
 ## Snapshot
-- **Last updated:** 2026-08-04
-- **Current branch:** `feat/PHASE-1-development` — ready to merge
+- **Last updated:** 2026-08-06 — **Phase 2 closed.**
+- **Current branch:** `feat/PHASE-2-development`. Phase 1 is merged; `main` is at
+  `b9e73e0`. **Phase 2 is not yet merged** — see Next Exact Steps.
 - **Version:** `0.2.0.dev0`
-- **Active phase:** **Phase 1 — CLOSED, accepted by the owner 2026-08-04**
-- **Next phase:** **Phase 2 — deterministic desktop and browser automation**,
-  not started. `docs/BACKLOG.md` §5 is the plan.
-- **Overall status:** Green. `python -m pytest` → **916 passed, 2 skipped**
-  (Phase 0 baseline 386; 698 → 745 → 832 → 907 → 916). Nothing is blocked.
+- **Active phase:** **Phase 2 complete.** Report:
+  `docs/phase-reports/PHASE-02-DESKTOP-AND-BROWSER.md`. **Phase 3 has not
+  started**; its kickoff brief is `docs/PHASE-03-KICKOFF.md`.
+- **Overall status:** Green.
+  - `python -m pytest -m "not slow"` → **1488 passed, 4 skipped, 3 deselected**
+    (~83s, opens no socket). Use this while working.
+  - `python -m pytest tests/security` → **485 passed, 3 skipped**.
+  - `python -m pytest` (full) → downloads the wake models from GitHub; slower.
+  - `python -m jarvis.main --check` → exit 0, **18 tools**, 15 applications.
+- **Awaiting the owner:** acceptance list
+  `docs/PHASE-02-ACCEPTANCE-TESTING.md` **§C.1–§C.7**.
+- **Live defects and limitations:** `docs/KNOWN_ISSUES.md` — 13 open or worked
+  around. Read it before promising anything about the browser or YouTube Music.
+
+> **Running the suite:** `pyproject.toml` already sets `addopts = "-q"`. Do **not**
+> add another `-q` — two of them suppress pytest's final `N passed` line, which
+> looks alarmingly like a truncated crash and is not one.
+
+## Phase 2 is complete
+
+21 of 30 backlog items done, 4 partial, 5 not started — every one of the five
+named with a reason in the phase report §7, and none of them "we forgot".
+
+**What Jarvis can now do:** search YouTube and play a result by position; restart
+the browser so automation can attach; list, arrange, snap and move windows; say
+what the user is looking at; close an application and stop when it objects;
+force-close with fresh confirmation every time; photograph the screen visibly
+with blocklisted windows blacked out; and find, reveal and open files inside the
+folders Windows reports as the user's.
+
+**The theme of the phase was honesty, not capability.** Eight separate defects
+were the same mistake — a check that could not tell "I did this" from "this was
+already true". The corrections are structural and are now rules in `CLAUDE.md`.
 
 ### Phase 1 is accepted
 
@@ -132,11 +161,426 @@ that change what the product can do:
 
 ## In Progress
 
-Nothing. Phase 1 is closed and accepted; Phase 2 has not started.
+### 2026-08-06 — stage 5 opened: finding files
+
+P2-FS-01, P2-FS-03 and P2-FS-06 shipped together, because the first two are
+unsafe without the third. `files.find` searches the Windows Known Folders and
+`files.reveal` opens Explorer with a result selected. Neither takes a path: the
+model receives numbered results and hands a number back, which puts the
+injection defence in the signature rather than in a check that has to be
+remembered. Paths resolve before the boundary is compared, so `..`, environment
+variables, symlinks and junctions are judged by destination rather than
+spelling (`tests/security/test_file_scope.py`).
+
+**Left out deliberately, not forgotten.** P2-FS-05 (open a file with an approved
+application) needs a new catalogue argument kind — a file path passed to an
+approved binary — which touches ADR-0029, the one process-creation rule
+everything rests on. That wants its own ADR rather than a quiet extension.
+P2-FS-04 (disambiguation dialog) is UI work. The browser stage remainder
+(BRW-03/05/07/09) is untouched, and the YouTube Music targeting bug lives there.
+
+**The suite was downloading models from the internet.** Three wake-word tests
+call the real installer, which fetches from GitHub — the reason full-run timings
+swung between 90 and 234 seconds. They are marked `slow`; `pytest -m "not slow"`
+is 78s and opens no socket. Separately, the new turn tests were paying the real
+one-second desktop settle three times over, which is now injected as zero.
+
+
+### 2026-08-06 late — a turn now finishes its work (ADR-0033)
+
+Three reports in one evening, one cause. The turn ended the moment the model
+produced text instead of a tool call, so *"I'll close it for you"* ended it as
+surely as closing it did. The owner's next message settled the design: asked
+*"did you close it?"*, Jarvis looked and said *"Nope, it's still there"* — it
+had the tool, the information and a system prompt telling it not to claim
+things it had not done. What it lacked was any reason to carry on.
+
+A turn now continues while its own reply describes work nothing did: a promise,
+a completion claim nothing verified, or a claim about a *different* action than
+the one performed. Bounded at 12 rounds and 3 follow-ups; when they run out the
+reply says the work did not happen. Every follow-up still goes through
+`ToolInvoker`'s six checks, so continuation creates no new path from a plan to
+an effect.
+
+The third shape came from *"YouTube Music is now open and playing the current
+song"* — `app.open` verified, nothing that can play anything ever ran. "Did any
+tool verify something?" answered yes. Claims are now matched against the tools
+that could have produced them (`CLAIM_EVIDENCE`), and a verified tool the
+mapping does not recognise is never contradicted, because it might be the one
+that did the work.
+
+**Known limits, recorded rather than discovered later:** `CLAIM_EVIDENCE` is a
+closed list and every new tool needs an entry. This stops a turn ending on an
+unkept promise; it cannot make the model choose the right tool, and a model that
+cannot do the job now fails after three attempts instead of one.
+
+### 2026-08-06 evening — the grounding check was sound and its premise was false
+
+The owner asked Jarvis to close Microsoft Edge. The audit log is unambiguous:
+
+```
+13:58:29  window.list   succeeded verified   -- "MS Edge ... has been closed successfully"
+13:59:24  window.list   succeeded verified   -- "MS Edge ... has been closed successfully!"
+```
+
+**No close tool ran in either turn**, and both replies were labelled *confirmed
+by a tool*. Edge was open throughout. It took two corrections from the owner
+before `app.close` was called at all, and a third before `app.force_close`.
+
+`jarvis.llm.grounding` exists to stop precisely this and did not fire. Its rule
+— a success claim needs a `verified` result — is safe *because a read-only tool
+reports `not_applicable`*, having changed nothing to verify. `window.list`
+declared `changes_state=False` and returned `VERIFIED`, so the premise failed
+and "I verified that I listed your windows" licensed "I closed Edge".
+
+`ToolInvoker` already enforced the mirror rule: a state-changing tool reporting
+`not_applicable` is downgraded to `unverified`. The missing direction is now
+enforced beside it — **a tool that changes nothing has nothing to verify** —
+normalised at the invoker, because that is the single point every effect passes
+through and a per-tool rule is one the next tool forgets. A useful side effect:
+`verified` now means exactly "a state-changing tool confirmed its own effect",
+which is a signal the rest of the engine can rely on.
+
+The second half is the model narrating rather than acting, which no rule can
+forbid. Each tool round now ends with a trusted record of what changed and, more
+usefully, what did not: every individual tool message was accurate, and **none of
+them could report an absence**. Whether it now calls the right tool on the first
+ask is for the owner's next round (`docs/PHASE-02-ACCEPTANCE-TESTING.md` §4.17).
+
+### 2026-08-06 — stage 4: a false `verified`, and two things that were wired to nothing
+
+**The Edge close bug is the important one.** The owner closed Notepad (worked),
+then closed Microsoft Edge with a media tab that prompts before leaving. Jarvis
+reported *"Microsoft Edge has been closed"*, **verified**, and Edge was still on
+screen.
+
+`WindowController.close` decided by asking whether the window was still in
+`WindowDiscovery.list_windows`. That list answers *would a person call this
+open* — it drops the invisible, the untitled, the DWM-cloaked and the zero-area
+ghosts, which is precisely the filter that turned a listing of eleven windows
+into the owner's four. Chromium hides its frame while a close is pending
+(`BrowserView::CanClose()`), so Edge left that list while entirely alive.
+
+Reproduced before any fix, with Character Map standing in for Edge
+(`tools/window-lab/test_close_verification_live.py`): `outcome=closed
+verified=True` about a window with `exists=True visible=False`.
+
+Fixed by separating the two questions. `WindowDiscovery.window_exists` asks
+`IsWindow`; presentability stays in `list_windows`. A window that exists but is
+off screen is a new outcome, `still_running`, rather than either of the existing
+two — calling it `closed` was the bug, and calling it `still_open, nothing
+asking` would be a confident claim about the case it is most often wrong about,
+since Chromium draws its prompt inside the page where nothing can see it.
+
+**Two more "built but unreachable".** This is now the fifth and sixth instance
+of the pattern in this project:
+
+- `screen.capture` (P2-WIN-10) existed as a fully tested core with no tool. It
+  is now registered through `attach_shell`, so it exists only when something can
+  show the capture indicator — the same choice `notify.show` makes, and a
+  stronger one, because a capture nobody can see is the thing FR-271 forbids.
+  `tests/unit/test_capture_tool_wiring.py` asserts the registered tool reaches
+  the real GDI grab, not a stub.
+- `storage.huggingface_home` had named a directory since Phase 1 and **nothing
+  ever read it**. The owner's models were in the right place only because they
+  had exported `HF_HOME` by hand.
+
+**Speech models are local-only by default now.** The owner's log showed a
+`HEAD https://huggingface.co/...` on the path of *every spoken reply*: Kokoro
+resolves voice tensors at synthesis time and `huggingface_hub` revalidates
+cached files. faster-whisper does the same once at load. Offline mode was the
+wrong switch — the owner is not offline, they want the weights local — so
+`storage.speech_models_local_only` (default on) pins the hubs in every network
+mode. The network is for fetching a model that is missing, never for confirming
+one already present.
+
+While fixing it: the previous control was **partly ineffective and its test was
+vacuous**. `huggingface_hub` reads `HF_HUB_OFFLINE` into `constants` at *import*,
+not at model load, so setting it afterwards changed nothing — and the test
+asserted only that the environment variable was set, which it always was. The
+library is now updated in place and the test checks what the library believes.
+
+**P2-WIN-11 shipped as the honest half of FR-270.** `screen.active_window` names
+the window in front and says plainly that Jarvis cannot read what is inside it.
+Describing contents needs a vision model (Phase 4); assembling a description
+from the window title would be inventing, and the title is application-authored
+text besides.
+
+**Capture retention is bounded, not solved.** A full-screen BMP is ~15 MB, so
+`prune_captures` keeps the newest 20. `privacy.screenshot_retention` describes
+what the product should eventually do and is **not** implemented — named here so
+the bound is not mistaken for the policy.
+
+### 2026-08-05 — the session that found six defects, and what changed
+
+The owner asked Jarvis to open YouTube and search "best monitors". The whole
+sequence is in `logs/audit.jsonl` and it is the most useful thing in this
+document, because the first step is what broke the second and the tests were
+green throughout.
+
+| Local | What the audit log records |
+|---|---|
+| 12:35:28 | `app.open(youtube)` launched Brave **without** a debugging port. Verified success. No search tool was called; the reply said *"Now searching for 'best monitors'"* anyway, labelled `[confirmed by a tool]` |
+| 12:36:24 | `youtube.search` approved, then **failed**: *"Brave is already open… cannot be given an automation port"* |
+| 12:37:36 | Identical failure. Jarvis asked the owner to quit Brave from the taskbar |
+| 12:38:30 | Owner quit Brave by hand → launched with a port, attached in 2.5s, **20 results** |
+| 12:39 | "Search a latest anime" → **no tool call at all**; the model just talked |
+| 12:42:51 | `youtube.search` **failed**: `Page.goto: Target page, context or browser has been closed` |
+
+Four approvals were requested and every one of them recorded
+`approval scope 'task' rejected — scope 'task' requires a task_id`.
+
+**Root cause, one sentence: nothing owns the browser's lifecycle.** Four code
+paths start Brave and only one leaves it automatable, so Jarvis's own first
+action made its second action impossible — and the only remedy was manual. Every
+unit test passed because every unit was correct. This is the phase's recorded
+lesson (*test the seam, not the unit*) reappearing one layer up: the seam is now
+a **resource's lifecycle across tools**, not a wire between two components.
+
+**What was fixed** (ADR-0032; tests in `tests/unit/test_browser_restart_and_tabs.py`
+and `tests/unit/test_approval_scopes_that_stick.py`):
+
+1. **`browser.restart` exists.** Jarvis had been *offering* to close and reopen
+   Brave for some time with no capability behind the offer. `WM_CLOSE` to the
+   visible windows, then poll until the process exits — asked, never killed, so
+   Chromium saves its session and the tabs return. A browser that refuses is a
+   declared failure, never a `TerminateProcess`. Its own capability: approving a
+   search is not approving the loss of someone's windows.
+2. **`browser_restart_required` is its own failure code.** Told only
+   "unavailable", the model improvised instructions for a human. The tool
+   description now names the code it answers and says not to do that.
+3. **A closed tab is replaced.** `is_alive()` asked about the *browser*, which
+   was fine; the cached tab had died and nothing looked at it. A live tab is
+   still reused, so "play the second video" lands on the page the search read.
+4. **`BrowserWorkspace` owns a thread.** Playwright's sync API is bound to its
+   creating thread; the tool executor has four workers and abandons the *thread*
+   on a timeout. Every recorded session ended with `greenlet.error: Cannot
+   switch to a different thread` from `MainThread` — meaning teardown never ran
+   and the debugging port was left open. Under ADR-0031 teardown is a security
+   control, so this was the control silently not running, every single time.
+5. **A conversation turn carries a task id**, so "Allow for this task" is
+   honoured instead of discarded. And a general rule is now asserted: a scope
+   the dialog offers must be one the engine can grant.
+6. **Browser automation may be granted "always"** (owner decision, ADR-0032).
+   Offered, never defaulted; one named capability; empty by default in code;
+   high risk still never eligible. Recorded in `THREAT_MODEL.md` §6.1 as a
+   **reduction in control**, not as a neutral convenience.
+7. **Present-tense narration is hedged.** Nothing is ever under way when Jarvis
+   speaks — a turn finishes its tools first — so "Now searching…" is false
+   either way. This is why "did any tool verify anything" could not catch it:
+   `app.open` had verified, honestly, something else entirely.
+
+**Also fixed, small but real:** the searched tab came back in light mode because
+Playwright emulates `prefers-color-scheme: light` on pages it creates.
+
+**Verified outside the suite:** the new `ctypes` window enumeration was run
+read-only against the live machine — `brave.exe` 31 processes / 1 visible
+window, `explorer.exe` 1 / 10, a non-existent process 0 / 0.
+
+**Not fixed, and worth knowing:** the browser lifecycle is still not unified.
+ADR-0032 Option 1 would have routed every browser action through one automatable
+session; the owner declined it, because it leaves a CDP port open whenever
+Jarvis opens the browser at all. So "open YouTube" then "search it" still costs
+a restart. Recorded in `ARCHITECTURE.md` §13 gap 5a.
+
+### Phase 2, stage 0 — "measure and unblock"
+
+Nothing in stage 0 is a feature; all of it gates something.
+Plan: `docs/phase-plans/PHASE-02-PLAN.md` §5.
+
+| Stage 0 item | Status |
+|---|---|
+| CDP spike part A — does Brave open a debugging port? | **Done.** Measured |
+| `automation` optional extra with lazy imports | **Done.** Suite still green |
+| CDP spike part B — Playwright attach + index-addressable results | **Done.** Measured |
+| ADR-0018, ADR-0019, ADR-0023, ADR-0031 | **Done.** Recorded |
+| YouTube Music defect | **Diagnosed and fixed.** See `docs/BACKLOG.md` §4.6.1 |
+
+**Stage 0 is complete and was accepted by the owner on 2026-08-04.** Suite at
+stage 0 close: **925 passed, 2 skipped** (916 at phase start).
+
+**Stage 1 — the untrusted-content boundary — is complete.** Suite at stage 1
+close: **1029 passed, 2 skipped.** Acceptance items are in
+`docs/PHASE-02-ACCEPTANCE-TESTING.md`; none of them block stage 2.
+
+**Stage 2 — automation foundations — is complete.** Suite at stage 2 close:
+**1064 passed, 2 skipped.** **Nothing can move the pointer or press a key yet**
+— stage 2 built the eyes and the permission to move, deliberately before any tool
+that moves, because a lock retrofitted onto tools written without one is how
+Phase 1's defect class reappears.
+
+| Piece | Where | What it guarantees |
+|---|---|---|
+| Desktop-ownership rule | `tests/security/test_tool_specs_are_valid.py` | A tool declaring `input.automate` or `browser.automate_logged_in` without the `foreground_desktop` lock **fails the build**. A second test asserts those capability ids exist, so the rule cannot silently match nothing |
+| `UserInputWatcher` | `jarvis/toolbox/desktop_input.py` | Tells our synthetic input from the user's, **exactly** — no time tolerance |
+| `UiaInspector` | `jarvis/toolbox/uia.py` | Reads a window's controls. Read-only, asserted structurally. Element text leaves through `Observation`, addressed by position |
+| `AutomationSession` | `jarvis/toolbox/automation.py` | The only way to get permission to move anything |
+
+**Design notes worth not rediscovering:**
+
+- **No grace window for input attribution.** The first `UserInputWatcher`
+  compared timestamps with a 250ms tolerance; a test killed it, because a user
+  grabbing the mouse 50ms after an automated click is the case that matters most
+  and a tolerance swallows precisely that. The replacement records what the
+  *system* reports immediately after our injection — anything later is not ours,
+  with no tuning. Do not reintroduce a window.
+- **One real-hardware risk is open**, recorded in the code: if Windows has not
+  registered our injection when the baseline is read, our own input reads as the
+  user's and automation pauses itself. It needs a real `SendInput` to measure,
+  which arrives in stage 3. It fails in the safe direction.
+- **Automation refuses to start when interruption cannot be observed.** Not a
+  warning — a refusal, with the underlying cause passed through. Flagged to the
+  owner as reversible if they would rather it ran anyway.
+- **An accessible name is untrusted content.** A window can label a button
+  "Cancel" and wire it elsewhere. UI text uses the *same* boundary as web
+  content; there is no more-trusting path for desktop text.
+- **A Phase 0 exit-criterion test was narrowed, not weakened.** It banned
+  importing pywinauto/playwright anywhere in `src/`, while its own docstring said
+  the rule was *module scope* — which would have banned the lazy-import pattern
+  Phase 1 already relies on for the voice stack. Now scans `tree.body` like
+  `test_lazy_audio_imports.py`, and carries a self-check proving it still bites.
+
+### What stage 1 built, and the hole it found
+
+Built **before** anything in this product can fetch a page, which is the ordering
+the whole plan turns on: a defence written after the capability gets shaped to
+fit whatever the capability happened to emit.
+
+- **`jarvis.core.observations`** (L2) — `Observation`, `ObservedItem`,
+  `ObservedList`. External content has one shape and no trusted variant. The type
+  has no field for a capability, grant, risk level or tool id, so there is
+  nothing a hostile page could populate.
+- **`ChatMessage.from_observation()`** (L3) is the only route into a prompt and
+  sets `untrusted=True` with no parameter to override it. It lives in L3, not on
+  `Observation`, because L2 must not know about L3 —
+  `tests/security/test_layering.py` caught the first attempt, which had the
+  import hidden inside a function, and was right to.
+- **`ObservedList.select(position)`** is positional only. No lookup by label,
+  title or text exists, asserted structurally. **This is the control that carries
+  the weight**; the delimiters are defence in depth and assume a cooperative
+  model, this assumes nothing.
+- **A real vulnerability, found and fixed.** The delimiters that quote untrusted
+  content are fixed strings published in our own source, and content was embedded
+  verbatim — so a page containing `<<<END_UNTRUSTED_OBSERVATION>>>` closed the
+  quoted region early and everything after it read as trusted context. Shipped in
+  Phase 0 and Phase 1; unexploitable only because nothing could read a page yet.
+  Delimiters in observed content are now escaped, and left visible rather than
+  stripped, so a breakout attempt is evidence rather than a silent disappearance.
+  `ARCHITECTURE.md` §13 gap 4 called this strategy "specified but unexercised" —
+  exercising it is what found the hole.
+- **`tests/security/test_browser_attach.py`** fails the build if any module in
+  `src/` calls a Playwright launch API or passes `executable_path`, and asserts
+  `ALLOW_LIST` has not grown. `test_no_shell.py` AST-scans `src/` and cannot see
+  into `site-packages`, so without this a Playwright launch would create a second
+  process-creation call site with the suite still green (ADR-0031).
+
+The three diagnosed defects are fixed: launches no longer verify themselves
+against a process that was already running; the planner can see which
+applications it may open, so it stops routing "open YouTube Music" to a URL; and
+application names resolve however the model punctuates them. A **fourth** cause
+surfaced during acceptance and is the leading explanation for the original
+symptom — a launch that hands its command line to an already-running Brave
+appears to open a tab rather than the app. It is unconfirmed, it is recorded in
+§4.6.1, and `docs/PHASE-02-ACCEPTANCE-TESTING.md` §0.7 is the two-run test that
+settles it.
+
+### What stage 0 measured, on this machine, 2026-08-04
+
+Both spikes live in `tools/browser-lab/` and are outside the product runtime and
+outside the security policy, the same status `tools/voice-lab/` holds.
+
+- **Brave 151 opens a CDP port under ADR-0019 Option A** (`--profile-directory=Jarvis`)
+  **and** under Option B (`--user-data-dir=<temp>`). The plan predicted Option A
+  would be refused; the prediction was wrong. Option A stands as the owner chose,
+  and the pre-authorised Option B fallback is not needed.
+- **`connect_over_cdp` attaches to a browser started by `launch_argv`.** Process-creation
+  call sites in `src/` remain exactly **one**. ADR-0029 is consumed, not widened.
+- **A YouTube result page yields 13 `ytd-video-renderer` rows in DOM order.**
+  "The second video" is `results[1]` — a position, never a title match. This is
+  the structural control stage 1 is built around, and it is now known available
+  rather than assumed.
+- **Re-measuring requires Brave to be closed first.** A second `brave.exe` hands
+  its command line to the running instance and exits, so a refused flag and a
+  handed-off launch are indistinguishable.
+- Running the spike **created the `Jarvis` Brave profile**, which FR-056 wants
+  anyway. The owner signs into it once for whatever Jarvis should reach; it is
+  persistent. Decided 2026-08-04, recorded in ADR-0019.
 
 ## Blocked or Failing
 
-Nothing is blocked and no test is failing.
+Nothing is blocked.
+
+### One intermittent failure, seen once, not yet explained
+
+`tests/integration/test_core_lifecycle.py::test_a_completed_task_is_never_re_run_after_recovery`
+failed **once** during Phase 2 stage 3 with:
+
+```
+InvalidTransitionError: cannot move a task from 'running' to 'running'.
+```
+
+It then passed three times in isolation and the full suite passed twice more, so
+it is intermittent rather than broken, and it is **not** caused by the change
+that was in flight when it appeared (adding an import and a failure code).
+
+Recorded rather than shrugged off, because of what it implies: two things are
+transitioning the same task, which means a race between the scheduler and
+startup recovery. A recovery path that can re-enter a running task is exactly
+the class of defect that stays invisible until it re-runs a consequential action
+after a crash — and `test_a_completed_task_is_never_re_run_after_recovery` is
+named for the property it would break.
+
+**Do not chase it by re-running until green.** It needs the transition to be
+made idempotent, or the recovery path to take the task lock the scheduler holds.
+Reproduce with the full suite in a loop, not the single test.
+
+### Known limitation, deferred by the owner: automation wakes their other tabs
+
+**Symptom.** When Jarvis opens Brave and attaches, every other YouTube tab in
+the browser wakes and starts playing, all audible at once. Opening Brave by hand
+does not do this — the same tabs stay asleep. Reported 2026-08-05; the owner
+chose to defer it rather than hold up stage 4: *"i dont want to spend too much
+time on this, we can always look back on this later."*
+
+**Cause, measured not guessed.** `connect_over_cdp` attaches to **every page in
+the browser** — ten of ten in `tools/browser-lab/test_attach_cost.py`. Playwright
+is designed to drive a browser it owns; ADR-0019 Option D points it at one the
+owner is using, so attaching announces Jarvis to all their tabs. There is no
+Playwright option to narrow the attach. Nothing in Jarvis touches those tabs,
+which is why this cannot be fixed above Playwright.
+
+The exact Chromium step from "woken" to "playing" is **not** established.
+Autoplay is gated per origin on media engagement history, and a scratch profile
+has none, so `tools/browser-lab/test_attach_side_effects.py` cannot reproduce it
+and does not claim to. That gap does not affect the fix, because attaching to
+those tabs at all is unnecessary.
+
+**The fix is proven and not yet applied.**
+`tools/browser-lab/test_single_tab_cdp.py` drives one tab over raw CDP —
+`PUT /json/new` returns that tab's own WebSocket, which reaches it and nothing
+else. Measured against real YouTube with three decoy videos open:
+
+```
+search rtx 5070   -> 5 results, read by position
+play position 1   -> VERIFIED by video id
+decoy tabs        -> still paused, currentTime=0, all three
+```
+
+It also removes the Node driver and Playwright's thread-affinity trap (the
+2026-08-05 blank tab), and needs no synthetic click: read the id at position N
+and navigate to it, which is *more* deterministic and keeps selection strictly
+positional. `websocket-client` is installed; it is not yet in the `automation`
+extra because no product code imports it.
+
+**What is left to do:** a `jarvis.toolbox.cdp` module and a `CdpPageDriver`
+behind the existing `PageDriver` interface, then swap the session type. The
+tools, the permission checks and the positional-selection guarantee are
+unchanged. Budget one round of rough edges on real pages — it is code we own
+rather than a library.
+
+**Until then**, search and play work correctly on Playwright (verified end to
+end across two calling threads, `tools/browser-lab/test_exit_criterion_threaded.py`).
+The cost is the woken tabs, and it is loud rather than silent.
 
 **Known defects carried into Phase 2** — all in `docs/BACKLOG.md` §4.6, none of
 them silent in the product:
@@ -183,6 +627,23 @@ and always-listening is safe to offer as a switch.
   and `single_instance.py`.
 
 ## Decisions Requiring Attention
+
+### 2026-08-20 — "Jarvis" is now a brand, and ADR-0011 says it is not
+
+Asked during `/impeccable init`, the owner chose to treat **"Jarvis" as a real
+product identity** — wordmark, iconography, voice — rather than a display string
+awaiting naming review, and accepted the trademark risk. They also confirmed the
+UI is to be designed **for the redistributable product**, not for this machine,
+and that a local web or companion surface is planned but does not exist.
+
+`PRD.md` §1.16, `CLAUDE.md` and **ADR-0011 all state the opposite**: internal
+codename only, until product naming and trademark review complete. Two documents
+now disagree, which is the condition ADRs exist to prevent. **ADR-0011 needs to
+be amended or superseded before any design work leans on the name.** Until then
+the name stays a single swappable token in code, whatever design does with it.
+
+Recorded in `PRODUCT.md` (new, root level) — the durable product record for
+design work. It captures no visual direction and replaces no existing document.
 
 ### Settled 2026-08-02 — recorded, do not re-litigate
 
@@ -244,51 +705,43 @@ model (configured, not benchmarked).
 
 ## Next Exact Steps
 
-**Phase 1 is closed. Start here, in a new session.**
+**Phase 2 is code-complete and closed. Nothing is blocked.** In order:
 
-1. **Merge `feat/PHASE-1-development` into `main`.** The branch is accepted, the
-   suite is green and the documentation is current. Nothing on it is in flight.
+1. **The owner runs `docs/PHASE-02-ACCEPTANCE-TESTING.md` §C.1–§C.7.** Findings
+   go into `docs/KNOWN_ISSUES.md` or get fixed; do not start Phase 3 work on top
+   of an unaccepted phase without saying so.
 
-2. **Read `docs/BACKLOG.md` §5** — Phase 2, deterministic desktop and browser
-   automation. Its exit criterion *"Search RTX 5070 on YouTube and play the
-   second video"* is the shape of the whole phase: UI Automation before
-   coordinates, DOM selectors before pixels, and a foreground-control lock
-   acquired before anything moves.
+2. **Merge Phase 2 to `main`.** The branch has not been merged and Phase 1 was,
+   so `main` is a phase behind. Open the PR when acceptance passes.
 
-3. **Expect the prompt-injection defence to get its first real exercise.**
-   Phase 2 is where untrusted content — web pages, search results, page titles —
-   first enters the system. The rule is already written and already tested in
-   principle: web content can inform a plan, it can never authorise a
-   capability. Phase 2 is where that stops being theoretical.
+3. **Then Phase 3.** Read `docs/PHASE-03-KICKOFF.md` first — it is written for a
+   session that has none of this conversation's context.
 
-4. **Two small Phase 1 leftovers worth doing early**, because both are cheap and
-   both are visible every day: **a time/date tool**, and the **YouTube Music
-   app-id** defect. Neither is architectural.
-
-5. **The application-catalogue ADR**, when stability allows. Start-menu
-   discovery as the executable source (machine state, never model output),
-   approval on first use, persisted entries, a `.lnk` parser that runs nothing,
-   and care around the `powershell.exe` shortcut every Start menu contains.
-   ADR-0029 constraint 3 survives by construction: the model still names an
-   *entry*, never a binary. Progressive web apps come free with it.
-
-### Carry these habits into Phase 2
-
-- **Test the seam, not just the unit.** Six acceptance rounds all found the same
-  class of defect: components that worked, connected to nothing. The rule that
-  caught them is worth restating — an enabled control either does something or
-  says why it cannot.
-- **Read the exit code.** A UI suite reported every assertion passing and
-  returned `0xC0000374`.
-- **Write the test named after the defect**, in the words the defect was
-  reported in. Every regression test added this phase is readable as an account
-  of what went wrong.
+**Do not start with:** BRW-09 (YouTube Music) unless the owner is free to have a
+browser opened on their desktop for selector measurement; BRW-05 or BRW-07,
+which are Phase 2 leftovers and should be scheduled deliberately rather than
+picked up by accident.
 
 ## Uncommitted or Temporary State
-Nothing uncommitted. Phase 1 is complete on `feat/PHASE-1-development`, branched
-from `df4a35b`, and the branch is ready to merge into `main`. Nothing is stubbed
-to report false success; every unbuilt screen and menu entry still names its
-phase (ADR-0010).
+**`PRODUCT.md` is new and untracked** (2026-08-20, `/impeccable init`), along
+with this entry and the naming decision above. Nothing else is uncommitted.
+Phase 1 is merged into `main` (`b9e73e0`, PR #2). Phase 2
+work is on `feat/PHASE-2-development`. Nothing is stubbed to report false
+success; every unbuilt screen and menu entry still names its phase (ADR-0010).
+
+**Environment changes made during stage 0**, so a fresh checkout is not
+surprised by them:
+
+- `pip install -e ".[automation]"` was run, adding playwright 1.62.0,
+  pywinauto 0.6.9, comtypes, pywin32, pyee and greenlet to `.venv`. Required to
+  run `tools/browser-lab/test_playwright_attach.py`.
+- `playwright install` was **not** run and must not be. The product drives the
+  user's real Brave, never a bundled Chromium (ADR-0019, ADR-0031).
+- A **`Jarvis` Brave profile now exists** at
+  `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Jarvis`, created by the
+  spike. It is empty and signed out. Note it lives **outside the vault**, so
+  FR-057 and any full-deletion path must delete it explicitly — recorded as a
+  requirement in ADR-0019.
 
 No temporary migrations or compatibility shims. No process needs to be running;
 Ollama is optional. `tools/voice-lab/` and `tools/qwen-tts-lab/` are research

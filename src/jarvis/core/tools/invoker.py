@@ -237,9 +237,11 @@ class ToolInvoker:
         # The offered-scope table is ADR-0027's, and high risk offering only
         # single use is PRD 9.9 and 11.1, not a UX preference.
         capability = self._permissions.capability(capability_id)
+        policy = self._permissions.policy
         offerable = offerable_scopes_for(
             risk,
-            allow_always_for_low_risk=self._permissions.policy.allow_always_for_low_risk,
+            allow_always_for_low_risk=policy.allow_always_for_low_risk,
+            always_allowable=capability_id in policy.always_allowable_capabilities,
         )
         return ApprovalRequest(
             capability_id=capability_id,
@@ -439,6 +441,21 @@ class ToolInvoker:
             outcome = ToolOutcome.SUCCEEDED
             if spec.changes_state and execution.verification is Verification.NOT_APPLICABLE:
                 execution = execution.model_copy(update={"verification": Verification.UNVERIFIED})
+            # And the mirror image, which was missing until 2026-08-06: a tool
+            # that changes nothing has nothing to verify, whatever it reports
+            # about itself. `window.list` declared `changes_state=False` and
+            # returned `verified`, and `jarvis.llm.grounding` reads any verified
+            # result as licence for a reply to claim an action happened — so
+            # "I verified that I listed your windows" became "I closed Edge",
+            # twice, in front of the owner, with Edge still on screen.
+            #
+            # Normalised here rather than in each tool because this is the one
+            # place every effect passes through, and a rule enforced per-tool is
+            # a rule the next tool forgets.
+            elif not spec.changes_state and execution.verification is Verification.VERIFIED:
+                execution = execution.model_copy(
+                    update={"verification": Verification.NOT_APPLICABLE}
+                )
             if execution.verification is Verification.FAILED:
                 outcome = ToolOutcome.FAILED
 

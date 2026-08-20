@@ -219,6 +219,18 @@ class KokoroTtsProvider:
     def voices(self) -> Sequence[VoiceDescription]:
         return self._VOICES
 
+    @property
+    def loaded(self) -> bool:
+        return self._pipeline is not None
+
+    def load(self) -> None:
+        """Load the voice model. Slow; call it from a worker at start-up.
+
+        Public counterpart to `_load`, so start-up warming does not have to
+        reach into a private. Matches `FasterWhisperSttProvider.load`.
+        """
+        self._load()
+
     def _load(self):
         if self._pipeline is None:
             if not self.available:

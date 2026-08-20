@@ -47,6 +47,23 @@ UNTRUSTED_CLOSE = "<<<END_UNTRUSTED_OBSERVATION>>>"
 _MAX_RESPONSE_BYTES = 8_000_000
 
 
+def _neutralise_delimiters(text: str) -> str:
+    """Stop observed content from closing the wrapper that quotes it.
+
+    The delimiters are fixed, published strings sitting in this file, so any web
+    page, document or filename can contain one. Embedded verbatim, a page that
+    includes ``<<<END_UNTRUSTED_OBSERVATION>>>`` ends the quoted region early and
+    everything it writes afterwards appears to the model to be trusted context.
+
+    The escape keeps the text readable rather than deleting it — an attempt to
+    break out is evidence, and hiding it would make the attack invisible in the
+    audit log while doing nothing extra for safety.
+    """
+    for marker in (UNTRUSTED_OPEN, UNTRUSTED_CLOSE):
+        text = text.replace(marker, marker.replace("<<<", "<<<ESCAPED:", 1))
+    return text
+
+
 class OllamaChatProvider:
     """Chat against a loopback Ollama. Blocking; call from a worker thread."""
 
@@ -127,6 +144,13 @@ class OllamaChatProvider:
         if message.untrusted:
             # Wrapped, and labelled as observed. The planner is instructed that
             # nothing inside may authorise an action (PRD section 11.4).
+            #
+            # Neutralised first, because the delimiters are published constants
+            # in this file and a web page can simply contain one. Embedding the
+            # content verbatim let a page close the wrapper early and have
+            # everything after it read as being outside the quoted region —
+            # the entire strategy defeated by a string literal.
+            content = _neutralise_delimiters(content)
             content = f"{UNTRUSTED_OPEN}\n{content}\n{UNTRUSTED_CLOSE}"
         encoded: dict[str, Any] = {"role": message.role.value, "content": content}
         if message.name:

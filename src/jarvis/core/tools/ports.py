@@ -38,7 +38,10 @@ _DENIAL_SCOPES: dict[str, tuple[GrantScope, str]] = {
 
 
 def offerable_scopes_for(
-    risk: RiskLevel, *, allow_always_for_low_risk: bool = True
+    risk: RiskLevel,
+    *,
+    allow_always_for_low_risk: bool = True,
+    always_allowable: bool = False,
 ) -> tuple[GrantScope, ...]:
     """The allow-scopes the dialog may offer, per the ADR-0027 table.
 
@@ -46,11 +49,26 @@ def offerable_scopes_for(
     and nothing else. ``SESSION`` is deliberately absent: the engine still
     supports it programmatically, but its lifetime is invisible to a user, and
     "this task" already covers approving a multi-step operation once.
+
+    ``always_allowable`` adds "always" for one named medium-risk capability
+    (ADR-0032). It is passed per capability rather than per risk band, because
+    the exception is the owner naming a capability they use constantly, not a
+    reclassification of everything that shares its risk level.
+
+    **Whatever this returns, the engine must be able to grant.** The dialog once
+    offered "Allow for this task" for a request that carried no task id; the
+    engine rejected the scope, the owner's choice was discarded, and they were
+    asked again on the very next sentence — four times in seven minutes on
+    2026-08-05. `test_approval_scopes_that_stick.py` now walks this table and
+    grants each entry, so the two cannot drift apart again.
     """
     if risk is RiskLevel.HIGH:
-        # PRD 9.9 and 11.1: fresh confirmation every time. Not a UX choice.
+        # PRD 9.9 and 11.1: fresh confirmation every time. Not a UX choice, and
+        # `always_allowable` does not reach here.
         return (GrantScope.ONCE,)
     if risk is RiskLevel.MEDIUM:
+        if always_allowable:
+            return (GrantScope.ONCE, GrantScope.TASK, GrantScope.ALWAYS)
         return (GrantScope.ONCE, GrantScope.TASK)
     if risk is RiskLevel.LOW:
         return (GrantScope.ONCE, GrantScope.ALWAYS) if allow_always_for_low_risk else (GrantScope.ONCE,)

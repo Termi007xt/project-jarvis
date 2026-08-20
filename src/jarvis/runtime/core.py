@@ -61,6 +61,21 @@ from jarvis.tasks.states import TaskState
 from jarvis.tasks.store import TaskStore
 from jarvis.toolbox.launch import ApplicationCatalogue, default_catalogue
 from jarvis.toolbox.phase1_tools import NotifyTool, register_phase1_tools
+from jarvis.toolbox.phase2_tools import BrowserWorkspace, register_phase2_tools
+from jarvis.toolbox.capture import (
+    ScreenCapture,
+    default_capture_directory,
+    gdi_screen_grab,
+)
+from jarvis.toolbox.phase2_capture_tools import (
+    ScreenCaptureTool,
+    register_capture_tool,
+)
+from jarvis.toolbox.files import default_scope
+from jarvis.toolbox.phase2_file_tools import FileWorkspace, register_file_tools
+from jarvis.toolbox.phase2_window_tools import register_window_tools
+from jarvis.toolbox.window_actions import Win32ActionBackend, WindowController
+from jarvis.toolbox.windows import WindowDiscovery
 from jarvis.toolbox.system_health import HealthCheckRunner, SystemHealthTool
 
 __all__ = ["JarvisCore", "CoreStatus", "EmergencyStopReport"]
@@ -116,6 +131,12 @@ class JarvisCore:
         approval_timeout_seconds: float | None = None,
         single_instance: SingleInstanceGuard | None = None,
         enforce_single_instance: bool = True,
+        #: Warm the speech models at start-up so the first command is not the
+        #: slow one. Off in tests: loading real models there costs tens of
+        #: seconds and, worse, the extra start-up work made a latent scheduler
+        #: race reproducible — a warm-up must not decide whether the suite is
+        #: green.
+        preload_models: bool = True,
         session_id: str | None = None,
     ) -> None:
         self.paths = (paths or VaultPaths.resolve()).ensure()
@@ -129,6 +150,7 @@ class JarvisCore:
         self._injected_approvals = approvals
         self._approval_timeout_seconds = approval_timeout_seconds
         self._enforce_single_instance = enforce_single_instance
+        self._preload_models = preload_models
         self._guard = single_instance or SingleInstanceGuard(
             lock_file=self.paths.runtime_dir / "single-instance.lock",
             force_lock_file=os.name != "nt",
@@ -197,6 +219,9 @@ class JarvisCore:
                 medium=Decision(self.config.permissions.default_policy.medium),
                 allow_always_for_low_risk=self.config.permissions.allow_always_for_low_risk,
                 session_grant_ttl_seconds=self.config.permissions.session_grant_ttl_seconds,
+                always_allowable_capabilities=(
+                    self.config.permissions.always_allowable_capabilities
+                ),
             ),
         )
         self.registry = ToolRegistry(self.audit, self.events)
@@ -277,6 +302,46 @@ class JarvisCore:
             # ``notify`` needs a shell; the UI supplies it via attach_shell().
             notify=None,
         )
+        # 9b. browser automation (Phase 2). The workspace holds the results of
+        # the last search so "play the second video" has a list to index into —
+        # the tools are registered whether or not a browser session is open, and
+        # say plainly that nothing has been searched for yet rather than being
+        # absent from the catalogue (ADR-0010).
+        self.browser_workspace = BrowserWorkspace(
+            session_factory=self._open_browser_session
+        )
+        register_phase2_tools(self.registry, self.browser_workspace)
+
+        # 9c. window management (Phase 2 stage 4). Discovery is read-only and
+        # the controller is the only thing that acts, sharing one blocklist so
+        # a window hidden from the listing cannot be arranged either.
+        self.window_discovery = WindowDiscovery()
+        self.window_controller = WindowController(
+            discovery=self.window_discovery, backend=Win32ActionBackend()
+        )
+        register_window_tools(
+            self.registry, self.window_discovery, self.window_controller
+        )
+
+        # 9d. screen capture (P2-WIN-10). Built here so the blocklist is the
+        # same object the window tools use — a window Jarvis refuses to arrange
+        # is the same window blacked out of an image. The indicator is left
+        # unset: only a shell can show one, so `attach_shell` supplies it and
+        # the tool does not exist until it does.
+        # 9e. files (Phase 2 stage 5). The scope is built once and shared, so
+        # the folders the search walks are the same ones `files.reveal` checks a
+        # position against — two scopes would drift and the second check would
+        # be against a boundary the first had never used.
+        self.file_workspace = FileWorkspace(
+            default_scope(getattr(self.config.storage, "workspace", ""))
+        )
+        register_file_tools(self.registry, self.file_workspace, self.applications)
+
+        self.capture_directory = default_capture_directory(self.paths.root)
+        self.screen_capture = ScreenCapture(
+            discovery=self.window_discovery, grab=gdi_screen_grab
+        )
+
         self.scheduler.register_runner(HealthCheckRunner(self.invoker))
         self._seed_bootstrap_grants()
 
@@ -294,6 +359,7 @@ class JarvisCore:
             )
         self.workers.start_all()
         self.scheduler.start()
+        self._start_model_warmup()
 
         self._started = True
         self.audit.record(
@@ -318,17 +384,39 @@ class JarvisCore:
         )
         return self
 
-    def attach_shell(self, notify: object) -> str | None:
-        """Let the shell supply what only it can: desktop notifications.
+    def attach_shell(
+        self, notify: object, capture_indicator: object | None = None
+    ) -> tuple[str, ...]:
+        """Let the shell supply what only it can: notifications, and the light.
 
         ``notify.show`` is registered here rather than at start-up because
         without a shell there is nothing to show a notification on, and a tool
         that always fails looks like a defect rather than an absence (ADR-0010).
+
+        ``screen.capture`` is registered on the same terms and for a stronger
+        reason. Jarvis does not photograph the screen without showing that it is
+        happening, and only the shell can show anything — so with no indicator
+        there is no capture tool at all, rather than a tool that captures
+        quietly. Returns the ids that were registered.
         """
-        if self.registry.get(NotifyTool.spec.tool_id) is not None:
-            return None
-        self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
-        return NotifyTool.spec.tool_id
+        registered: list[str] = []
+
+        if self.registry.get(NotifyTool.spec.tool_id) is None:
+            self.registry.register(NotifyTool(notify))  # type: ignore[arg-type]
+            registered.append(NotifyTool.spec.tool_id)
+
+        if (
+            capture_indicator is not None
+            and self.registry.get(ScreenCaptureTool.spec.tool_id) is None
+        ):
+            self.screen_capture.indicator = capture_indicator  # type: ignore[assignment]
+            tool_id = register_capture_tool(
+                self.registry, self.screen_capture, self.capture_directory
+            )
+            if tool_id:
+                registered.append(tool_id)
+
+        return tuple(registered)
 
     def _build_conversation_engine(self) -> ConversationEngine:
         planner = self.models.resolve(ModelRole.CONVERSATION)
@@ -359,6 +447,79 @@ class JarvisCore:
             persist=False if private else None,
             model=self.models.resolve(ModelRole.CONVERSATION).name,
         )
+
+    def _start_model_warmup(self) -> None:
+        """Warm the speech models in the background, off the start-up path.
+
+        The speech models load lazily, so the several-second wait landed on the
+        user's *first* command rather than on start-up. Warming them fixes where
+        the wait happens, not whether it happens.
+
+        On a background daemon thread on purpose: start-up must not block on a
+        model load, and a warm-up that fails must leave a working application
+        behind — the models still load on first use, just as slowly as before
+        (ADR-0010). It is therefore never awaited and never fatal.
+        """
+        import threading
+
+        if not self._preload_models:
+            return
+
+        def warm() -> None:
+            voice = getattr(self, "voice", None)
+            if voice is None:
+                return
+            outcome = voice.preload()
+            _LOG.info("model warm-up: %s", outcome)
+            self.audit.record(
+                AuditCategory.LIFECYCLE,
+                "preloaded speech models",
+                parameters=dict(outcome),
+            )
+
+        thread = threading.Thread(target=warm, name="jarvis-model-warmup", daemon=True)
+        thread.start()
+        self._warmup_thread = thread
+
+    def _open_browser_session(self):
+        """Open Brave on the dedicated Jarvis profile, attached over CDP.
+
+        The browser is started through the single authorised process-creation
+        call site with an ephemeral debugging port, and Playwright attaches to
+        it (ADR-0029, ADR-0031). The profile is the dedicated one FR-056
+        requires, so automation never drives the user's personal session
+        (ADR-0019).
+        """
+        from dataclasses import replace
+
+        from jarvis.toolbox.browser import DEDICATED_BROWSER_PROFILE, BraveCdpSession
+
+        brave = self.applications.get("brave")
+        if brave is None:
+            raise RuntimeError(
+                "Brave is not in the application catalogue, so there is no "
+                "approved browser to automate."
+            )
+
+        # ADR-0019 Option D, chosen by the owner on 2026-08-04 after using both
+        # isolated options: automation drives the owner's **own** Brave profile.
+        #
+        # This is a deliberate, recorded departure from FR-056, taken by the
+        # person whose accounts are at stake and after the risk was put to them
+        # in writing. What it buys is one browser window instead of two and no
+        # second set of logins. What it costs is the isolation boundary: any
+        # action a page induces executes as the signed-in user against every
+        # service they are signed into. See ADR-0019 for the full reasoning and
+        # the compensating controls this makes load-bearing.
+        automation_entry = replace(
+            brave,
+            app_id="brave_default_profile",
+            fixed_arguments=(
+                *brave.fixed_arguments,
+                f"--profile-directory={DEDICATED_BROWSER_PROFILE}",
+            ),
+        )
+        return BraveCdpSession(automation_entry)
 
     def _seed_bootstrap_grants(self) -> None:
         """Grant the two strictly self-inspecting capabilities on first start.
@@ -407,6 +568,15 @@ class JarvisCore:
         voice = getattr(self, "voice", None)
         if voice is not None:
             voice.shutdown()
+        # A browser left attached is a browser left listening on a debugging
+        # port. Closing it is a security control, not tidiness (ADR-0031).
+        workspace = getattr(self, "browser_workspace", None)
+        if workspace is not None:
+            # `shutdown`, not `close`: the workspace owns a thread, and the
+            # close has to run on it. Closing from here directly is what raised
+            # `greenlet.error: Cannot switch to a different thread` at the end
+            # of every session in the log, leaving the port open.
+            workspace.shutdown()
         self.scheduler.stop()
         self.workers.stop_all()
         self.invoker.shutdown(wait=False)

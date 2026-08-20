@@ -155,6 +155,81 @@ def test_a_failed_tool_does_not_verify_anything() -> None:
     assert not review.verified_by_tool
 
 
+# -- FR-048: a claim about the present tense is still a claim ---------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Verbatim, 2026-08-05 12:35:29. `app.open` had run and verified; no
+        # search tool was ever called. The reply reached the owner labelled
+        # "confirmed by a tool", and they reasonably read that as covering the
+        # sentence it was attached to.
+        'I see YouTube has been opened. Now searching for "best monitors".',
+        # 12:39:06, with no tool call at all behind it.
+        "Searching YouTube for latest anime now, Sir...",
+        'Opening fresh browse session now, Sir... Searching "latest anime".',
+        "I'm playing the second video for you.",
+        "I am opening Brave now.",
+    ],
+)
+def test_a_present_tense_claim_is_a_completion_claim(text: str) -> None:
+    """"Now searching" asserts an action as firmly as "I searched".
+
+    `SUCCESS_PHRASES` only matched the past tense, so a model narrating what it
+    was about to do sailed straight through the FR-048 check. To the person
+    listening there is no difference: both describe something happening that
+    was not happening.
+    """
+    assert claims_completion(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Shall I search YouTube for that?",
+        "Would you like me to start searching now?",
+        "I can search YouTube for best monitors if you want.",
+        "Searching YouTube requires the browser to be open.",
+        "I could not open the browser, so nothing was searched.",
+    ],
+)
+def test_offers_and_refusals_are_still_not_claims(text: str) -> None:
+    """The control. Hedging a question would make Jarvis unusable to talk to."""
+    assert not claims_completion(text)
+
+
+def test_an_in_progress_claim_is_hedged_even_when_a_tool_verified() -> None:
+    """Jarvis never has anything under way at the moment it speaks.
+
+    This is a property of the architecture, not a guess about wording. A turn
+    runs its tools to completion inside `ConversationEngine.ask` and only then
+    produces a reply, so by the time any sentence reaches the owner every action
+    it could describe has already finished or never started. "Now searching for
+    best monitors" is false in both directions — and it was said while
+    `app.open` sat there genuinely verified, which is exactly why asking "did
+    any tool verify anything" could never have caught it.
+    """
+    review = review_response(
+        'I see YouTube has been opened. Now searching for "best monitors".',
+        tool_results=(VERIFIED,),
+    )
+    assert review.amended, (
+        "a search that had not started was reported as under way, under a label "
+        "the owner reads as 'confirmed by a tool'"
+    )
+    assert "not under way" in review.text
+
+
+def test_a_finished_action_a_tool_verified_is_still_reported_plainly() -> None:
+    """The control, and why this rule is narrow rather than broad.
+
+    Past tense plus a verified tool is the case the whole system exists to
+    serve. Hedging it would make every success sound like a failure.
+    """
+    review = review_response("I've opened Brave for you.", tool_results=(VERIFIED,))
+    assert not review.amended
+    assert review.honest
+
+
 # -- FR-045 / FR-046 / AT-014 history and private sessions -----------------
 def test_a_normal_conversation_is_recorded(database, audit) -> None:
     store = ConversationStore(database, audit)

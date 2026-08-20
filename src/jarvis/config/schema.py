@@ -106,9 +106,13 @@ class WakeWordConfig(_Base):
     #: global hook swallows the key from every other application, and F9 is
     #: heavily used by IDEs, spreadsheets and games.
     push_to_talk_hotkey: str = "F9"
-    #: ADR-0016: always-listening stays off until enrolment has been measured
-    #: and passed. Push-to-talk is the fallback until then.
-    always_listening: bool = False
+    #: On by default since 2026-08-04, and the reason is a measurement rather
+    #: than a preference. ADR-0016 held always-listening off "until enrolment
+    #: has been measured and passed"; Phase 1 acceptance measured it — no false
+    #: wakes across an extended period of ordinary conversation at the shipped
+    #: 0.6 threshold — so the condition that kept it off has been met.
+    #: Push-to-talk remains available, and this remains a switch.
+    always_listening: bool = True
     enrolled: bool = False
 
 
@@ -227,6 +231,12 @@ class PermissionsConfig(_Base):
     default_policy: DefaultPermissionPolicy = DefaultPermissionPolicy()
     session_grant_ttl_seconds: Annotated[int, Field(ge=0)] = 3600
     allow_always_for_low_risk: bool = True
+    #: Medium-risk capabilities that may hold a standing "always" grant, named
+    #: one at a time (ADR-0032). Empty here so the code default is PRD 11.1's
+    #: posture exactly; `config/defaults.yaml` carries this machine's owner
+    #: decision, which keeps it visible in a file they can edit or empty.
+    #: High-risk capabilities are never eligible, whatever this lists.
+    always_allowable_capabilities: tuple[str, ...] = ()
 
 
 class TasksConfig(_Base):
@@ -265,6 +275,12 @@ class StorageConfig(_Base):
     huggingface_home: str
     application_data: str
     workspace: str
+    #: Resolve speech weights from disk alone, in every network mode. On means
+    #: the network is only ever used to *fetch a model that is missing*, which
+    #: is a deliberate act, and never to revalidate one already downloaded.
+    #: Kokoro loads its voice tensors at synthesis time, so revalidation put a
+    #: remote request on the path of every spoken reply (observed 2026-08-06).
+    speech_models_local_only: bool = True
 
 
 class PrivacyConfig(_Base):

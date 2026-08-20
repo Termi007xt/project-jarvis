@@ -717,6 +717,7 @@ the single call site ADR-0029 authorises.
 | Wake-word base model | Implemented (Phase 1) | openWakeWord `hey_jarvis` ONNX, installed via `--install-wake-model`, never bundled; non-commercial licence |
 | Per-user wake enrolment | Not implemented | ADR-0016 Path 1; always-listening stays off without it, and the button is disabled and says so |
 | Application launcher, browser, media, volume, speak, notify tools | Implemented (Phase 1) | six narrow typed tools; the launcher is the one call site ADR-0029 authorises |
+| Browser automation (`youtube.search`, `youtube.play`, `browser.restart`) | Implemented (Phase 2 stage 3) | Playwright attaches over CDP and never launches (ADR-0031). `BrowserWorkspace` **owns a thread**: Playwright's sync API is bound to its creating thread, and the tool executor has four workers and abandons the thread rather than the work on a timeout, so every browser touch is routed through one owned thread or teardown raises and the debugging port is left open. `browser.restart` resolves the one browser failure that has a remedy — a running Brave cannot be given an automation port — by asking it to close and reopening it, under its own capability (ADR-0032) |
 | Automation, vision, memory, skills | Not implemented | Phases 2–4 |
 
 ---
@@ -739,7 +740,21 @@ contested ones have an ADR.
    untrusted content yet. The delimiter strategy needs adversarial testing when
    the first content source lands (Phase 2).
 5. **`ALWAYS` grants have no automatic review.** A low-risk always-allow granted
-   once persists indefinitely; a periodic review prompt is a Phase 3 item.
+   once persists indefinitely; a periodic review prompt is a Phase 3 item. This
+   got sharper in Phase 2 stage 3: ADR-0032 lets **one named medium-risk**
+   capability (`browser.automate_logged_in`) hold an `ALWAYS` grant, so an
+   unreviewed standing grant now covers a browser holding live logins rather
+   than only a low-risk capability. The review prompt matters more than it did.
+5a. **Four ways to start the browser, one of which invalidates the others.**
+   `app.open`, `web.open_url` and `web.search` launch Brave with no debugging
+   port; automation needs one, and it can only be set at startup. Jarvis opening
+   YouTube is therefore what stops Jarvis searching it — the defect behind the
+   2026-08-05 session. ADR-0032 makes it *recoverable* (`browser.restart`)
+   rather than *impossible*; it does not unify the lifecycle, which was
+   Option 1 in that ADR and was declined because it would leave a CDP port open
+   on the browser whenever Jarvis opened it for any reason at all. The
+   consequence to keep in view: a plain "open YouTube" still costs a restart
+   before the next automation step.
 6. **Model-resource scheduling was configuration only.** `ModelRouter.hold` now
    refuses a second heavy role while one is held, so `sequential` is enforced
    rather than declared. It is still not meaningfully exercised until Phase 4

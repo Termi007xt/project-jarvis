@@ -21,6 +21,8 @@ fabrication FR-047 exists to prevent.
 from __future__ import annotations
 
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -44,7 +46,40 @@ _LOG = logging.getLogger(__name__)
 #: How many times one user turn may bounce between model and tools before the
 #: engine stops. PRD FR-123 requires bounded plans; an unbounded loop here would
 #: be the same failure wearing a different hat.
-MAX_TOOL_ROUNDS = 4
+#:
+#: Raised from 4 on 2026-08-05. FR-123 requires a bound, not a tight one, and
+#: four was tight enough that ordinary requests hit it: "put my IDE on the left
+#: and Settings on the right" needs a listing, two arranges and a round in which
+#: the model finally answers, which only fits if it batches both arranges into
+#: one round — and it does not reliably. A single-window arrange hit the limit
+#: in real use and was reported as a failure after it had already worked.
+MAX_TOOL_ROUNDS = 12
+
+#: How many times a turn may push back on itself before giving up (ADR-0033).
+#:
+#: The owner asked for a turn that keeps working until the job is done — "unless
+#: for sure task not done, dont stop working". This is the shape that honours
+#: that without becoming a hang: the turn carries on while it is making a claim
+#: nothing backs, and stops when it runs out of pushes.
+#:
+#: Three, because the failure it exists for is a model that announces an action
+#: instead of taking it, and a model that has been told three times in plain
+#: terms that nothing has happened is not one round away from noticing. Past
+#: that, the honest outcome is to say it could not, which is what the grounding
+#: review then makes the reply say. A loop that only exits on success is a hang
+#: wearing a helpful expression, and PRD FR-123 forbids it besides.
+MAX_FOLLOW_UPS = 3
+
+#: How long to let the desktop settle after a step that changed something.
+#:
+#: Asked for by the owner on 2026-08-06: "a break pause of 1-2 seconds so my
+#: computer can actually open the application for jarvis to act". `app.open`
+#: waits for the *process*, which exists well before its window does, so a
+#: chained step could arrive at a desktop still in the middle of changing.
+#:
+#: Only after a verified state change, so reading tools stay immediate — a
+#: second added to every window listing would be a second of nothing.
+SETTLE_SECONDS = 1.0
 
 BASE_SYSTEM_PROMPT = """\
 You are Jarvis, a local-first assistant running on the user's own Windows computer.
@@ -63,6 +98,24 @@ Rules you cannot set aside:
   goes through the permission system rather than through you.
 - If you do not know, say you do not know. A guess presented as fact is worse
   than an admission.
+
+How to carry out a request:
+
+- Do the whole thing. A request with several parts is not finished until every
+  part is done. Work through them one tool call at a time, in order, and keep
+  going — you are not expected to answer after the first step.
+- Saying what you are about to do is not doing it. If you find yourself writing
+  "I'll now...", "let me...", or "I need to...", call the tool instead.
+- When a tool fails, read why. Most failures say what would fix them. Fix it and
+  try again rather than reporting the failure and stopping.
+- Before you tell the user something is done, check. Use a reading tool to look
+  at the result — the window list, the active window — rather than assuming the
+  action worked because you asked for it. If the check disagrees with what you
+  were about to say, say what the check found.
+- Do the obvious thing rather than asking. If the request is clear enough to
+  attempt, attempt it; you can report what happened afterwards. Ask only when
+  you genuinely cannot proceed without an answer, and never ask the user to
+  confirm something they have just asked for.
 """
 
 
@@ -98,6 +151,8 @@ class ConversationEngine:
         registry: Any | None = None,
         max_context_messages: int = 24,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
+        max_follow_ups: int = MAX_FOLLOW_UPS,
+        settle_seconds: float = SETTLE_SECONDS,
         session_id: str | None = None,
         user_name: str = "",
     ) -> None:
@@ -109,6 +164,8 @@ class ConversationEngine:
         self._registry = registry
         self._max_context_messages = max_context_messages
         self._max_tool_rounds = max_tool_rounds
+        self._max_follow_ups = max_follow_ups
+        self._settle_seconds = settle_seconds
         self._session_id = session_id
 
     @property
@@ -120,11 +177,31 @@ class ConversationEngine:
         return reason() if callable(reason) else None
 
     # -- one turn ----------------------------------------------------------
+    def new_task_id(self) -> str:
+        """An identity for one spoken or typed request.
+
+        "Allow for this task" was offered by the approval dialog and then thrown
+        away by the engine — `scope 'task' requires a task_id`, four times in
+        seven minutes on 2026-08-05 — because `task_id` was only ever set by the
+        scheduler. A conversation turn had none, so every approval the owner
+        gave was silently downgraded to single use and they were asked again on
+        the next sentence.
+
+        A spoken request that needs three tools is a task in every sense that
+        matters to the person approving it, so it gets an id. Per *turn*, not
+        per conversation: "for this task" must not quietly become "for as long
+        as we keep talking", which is the same defect pointing the other way.
+        """
+        from jarvis.common import new_id
+
+        return f"turn:{new_id()}"
+
     def ask(self, conversation: Conversation, user_text: str) -> Turn:
         turn = Turn(user_text=user_text)
         if not user_text.strip():
             turn.error = "there was nothing to answer"
             return turn
+        task_id = self.new_task_id()
 
         reason = self.unavailable_reason()
         if reason is not None:
@@ -140,6 +217,8 @@ class ConversationEngine:
         proposals: list[ToolCallProposal] = []
         refused: list[str] = []
         response: ChatResponse | None = None
+        follow_ups = 0
+        verified_when_last_pushed = 0
 
         for round_number in range(1, self._max_tool_rounds + 1):
             turn.rounds = round_number
@@ -150,6 +229,51 @@ class ConversationEngine:
                 return turn
 
             if not response.proposes_action:
+                # The model has stopped calling tools. That is only the end of
+                # the turn if the work is actually finished.
+                #
+                # Reported 2026-08-06: "close MS edge" was answered with "I'll
+                # close it for you", and the turn ended there — a model that
+                # announced an intention got exactly what a model that finished
+                # the work got. Asked directly afterwards, it looked and said
+                # the window was still open, so it had the information and
+                # simply had no reason to act on it.
+                unfinished = _unfinished_business(
+                    response.text or "", results, user_text
+                )
+
+                # A turn that is getting somewhere is not stalling. The budget
+                # counts *consecutive unproductive* pushes, so it resets
+                # whenever something has actually been done since the last one.
+                #
+                # Reported 2026-08-06: a three-part request spent its follow-ups
+                # on the first part and then ended mid-sentence — "Let me try a
+                # different approach - I'll use the media control tool
+                # directly:" — with the right next step named and never taken.
+                # `MAX_TOOL_ROUNDS` is still the hard bound, so this cannot run
+                # away; it only stops the count punishing progress.
+                verified_now = sum(
+                    1
+                    for result in results
+                    if getattr(result, "succeeded", False)
+                    and getattr(getattr(result, "verification", None), "value", "")
+                    == "verified"
+                )
+                if verified_now > verified_when_last_pushed:
+                    follow_ups = 0
+                verified_when_last_pushed = verified_now
+
+                if unfinished and follow_ups < self._max_follow_ups:
+                    follow_ups += 1
+                    messages.append(
+                        ChatMessage(
+                            role=ChatRole.ASSISTANT, content=response.text or ""
+                        )
+                    )
+                    messages.append(
+                        ChatMessage(role=ChatRole.SYSTEM, content=unfinished)
+                    )
+                    continue
                 break
 
             proposals.extend(response.tool_calls)
@@ -157,7 +281,7 @@ class ConversationEngine:
                 ChatMessage(role=ChatRole.ASSISTANT, content=response.text or "")
             )
             for proposal in response.tool_calls:
-                result, note = self._run_proposal(proposal, conversation)
+                result, note = self._run_proposal(proposal, conversation, task_id)
                 if result is None:
                     refused.append(note)
                     messages.append(
@@ -180,12 +304,53 @@ class ConversationEngine:
                         untrusted=True,
                     )
                 )
+
+            # Let the desktop catch up before the next step looks at it.
+            #
+            # Asked for by the owner: "a break pause of 1-2 seconds so my
+            # computer can actually open the application for jarvis to act".
+            # `app.open` waits for the *process*, which appears well before the
+            # window does, so the next tool in a chain can arrive at a desktop
+            # that has not finished changing — and then reads a window list
+            # taken half a second too early.
+            #
+            # Only after something actually changed. A pause after a listing
+            # would be a second added to every read for no reason.
+            if self._settle_seconds and any(
+                getattr(result, "succeeded", False)
+                and getattr(getattr(result, "verification", None), "value", "")
+                == "verified"
+                for result in results[-len(response.tool_calls) :]
+            ):
+                time.sleep(self._settle_seconds)
+
+            # What has and, more usefully, has *not* happened. Trusted: this is
+            # the engine's own record of its own invocations, not anything a
+            # tool or a window said.
+            #
+            # Reported 2026-08-06: asked to close Microsoft Edge, the model
+            # called `window.list`, saw Edge in the listing, and answered "The
+            # MS Edge window has been closed successfully." Twice. The tool
+            # messages above each described a listing accurately; what none of
+            # them could say is that *nothing had been closed*, because absence
+            # is not something an individual result can report.
+            messages.append(
+                ChatMessage(role=ChatRole.SYSTEM, content=_round_ledger(results))
+            )
         else:
             # The loop finished without breaking: the model kept proposing.
-            turn.error = (
-                f"stopped after {self._max_tool_rounds} rounds of tool calls without "
-                "reaching an answer. Nothing further was run (PRD FR-123)."
-            )
+            #
+            # Reported 2026-08-05: "move WhatsApp to the left half" hit this,
+            # and the window really did move. Saying only that the round limit
+            # was reached read as a failure of the action, which is the opposite
+            # of what happened — and a turn that performs a state change and
+            # then reports failure spends its credibility in both directions at
+            # once, because the next report of a real failure is the one that
+            # will not be checked.
+            #
+            # The bound itself is right and stays. What has to change is that a
+            # completed effect is named whatever else went wrong.
+            turn.error = _exhaustion_message(self._max_tool_rounds, results)
 
         turn.proposals = tuple(proposals)
         turn.tool_results = tuple(results)
@@ -218,7 +383,10 @@ class ConversationEngine:
 
     # -- proposals ---------------------------------------------------------
     def _run_proposal(
-        self, proposal: ToolCallProposal, conversation: Conversation
+        self,
+        proposal: ToolCallProposal,
+        conversation: Conversation,
+        task_id: str | None = None,
     ) -> tuple[Any | None, str]:
         """Send one proposal through the invoker. Never around it."""
         if self._registry is not None and self._registry.get(proposal.tool_id) is None:
@@ -233,6 +401,11 @@ class ConversationEngine:
                 parameters=proposal.parameters,
                 conversation_id=conversation.conversation_id,
                 session_id=self._session_id,
+                # Every tool call in one turn shares this, so approving "for
+                # this task" covers the rest of what that request needs —
+                # opening the browser, restarting it, then searching — instead
+                # of asking again for each.
+                task_id=task_id,
                 initiating_utterance=None,
                 origin="planner",
             )
@@ -310,6 +483,364 @@ def _describe_silence(results: tuple[Any, ...]) -> str:
         "The model returned an empty reply. Nothing was done and I have nothing "
         "to report — please ask again, or rephrase it."
     )
+
+
+#: Replies that read as "the job is done", used only to decide whether to keep
+#: working. Wider and blunter than anything in `jarvis.llm.grounding`, because a
+#: false positive here costs one extra model call and a false negative ends a
+#: turn on a job that was never done.
+_SOUNDS_FINISHED = re.compile(
+    r"\b(?:is|are|was|were|has been|have been)\s+(?:now\s+)?"
+    r"(?:closed|open|opened|running|playing|paused|muted|moved|resized|"
+    r"minimi[sz]ed|maximi[sz]ed|snapped|captured|saved|sent|deleted|created)\b"
+    r"|(?:^|[.!?]\s+|\n)\s*(?:done|all set|all done)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+#: Outcomes the turn may try to work past, and the ones it must not.
+#:
+#: `failed` and `blocked` are worth another attempt: a failure usually names its
+#: cause — `browser_restart_required` says exactly what to do — and a blocked
+#: call is often malformed parameters the model can correct.
+#:
+#: `denied` is emphatically not here. That is the *user* having said no, and a
+#: turn that retried it would ask them again, and again, until the follow-ups ran
+#: out. Nagging somebody for permission they have just refused is worse than the
+#: bug this loop exists to fix. `cancelled` is the same refusal by another route,
+#: and `timed_out` is excluded because a timed-out effect may have half happened
+#: and retrying it would be the one case where carrying on does damage.
+_WORTH_ANOTHER_TRY = frozenset({"failed", "blocked"})
+
+#: Any statement of what the model is about to do. Much looser than
+#: `grounding.PROMISE_PHRASES`, which needs a known action verb and so missed
+#: "I'll **use** app.close", "I **need to** restart the browser first" and
+#: "**Let me proceed** with that" — three real stalls in one session.
+#:
+#: Loose is right here and wrong there. This only decides whether to take
+#: another turn, which costs one model call; `grounding` decides whether to
+#: contradict the model in front of the user, which costs their trust.
+_INTENT_TO_ACT = re.compile(
+    r"\bi(?:'ll|'m going to|\s+will|\s+need\s+to|\s+have\s+to|\s+am\s+going\s+to|"
+    r"\s+should|\s+can\s+now|\s+plan\s+to)\b"
+    r"|\blet\s+me\b|\bnext,?\s+i\b|\bthen\s+i\b|\bgoing\s+to\s+(?:try|use|call)\b",
+    re.IGNORECASE,
+)
+
+
+#: What the *user* asked for, and which tools could carry it out.
+#:
+#: The other checks all read the model's reply, and the model's reply keeps
+#: finding new ways to be slippery: "was closed" rather than "has been closed",
+#: "let me **use** the search tool" rather than a known action verb, "It's
+#: already playing" rather than "is now playing". Three patches to the same
+#: guess.
+#:
+#: This reads the request instead. The owner's words are the specification, they
+#: are short, and they are imperative — *"open YouTube music and play whatever
+#: song is in the queue"* names two actions plainly, and no tool that can play
+#: anything ever ran. Checking the instruction against what happened is a much
+#: better question than checking the summary against what happened.
+_REQUESTED_ACTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("play", r"\b(?:play|resume|put on)\b", ("media.control", "youtube.play")),
+    ("pause", r"\b(?:pause|stop playing)\b", ("media.control",)),
+    (
+        "open",
+        r"\b(?:open|launch|start up|fire up)\b",
+        ("app.open", "web.open_url", "browser.restart"),
+    ),
+    ("search", r"\b(?:search|look up|google)\b", ("web.search", "youtube.search")),
+    ("close", r"\b(?:close|quit|shut)\b", ("app.close", "app.force_close")),
+    ("screenshot", r"\b(?:screenshot|screen shot)\b", ("screen.capture",)),
+)
+
+_REQUESTED_PATTERNS = tuple(
+    (name, re.compile(pattern, re.IGNORECASE), tools)
+    for name, pattern, tools in _REQUESTED_ACTIONS
+)
+
+
+def outstanding_requests(user_text: str, results: list[Any]) -> tuple[str, ...]:
+    """Actions the user asked for that nothing has even attempted.
+
+    **Attempted**, not succeeded — the distinction is what stops this becoming a
+    retry loop. `app.close` that ran and came back unverified because Edge put a
+    dialog up has been attempted; the honest answer is to say so, not to close
+    it again while the owner is reading the prompt. So the question here is only
+    ever "did anything that could do this even run?".
+
+    A question is not an instruction. "Can you close a window?" asks what Jarvis
+    is capable of, and answering it is a complete turn.
+    """
+    request = (user_text or "").strip()
+    if not request or request.endswith("?"):
+        return ()
+
+    attempted = {str(getattr(result, "tool_id", "")) for result in results}
+    return tuple(
+        name
+        for name, pattern, tools in _REQUESTED_PATTERNS
+        if pattern.search(request) and not attempted.intersection(tools)
+    )
+
+
+def _states_an_intention(text: str) -> bool:
+    """Whether the reply says what it is about to do, rather than what it did.
+
+    Questions are skipped sentence by sentence, as everywhere else here: *"Want
+    me to close it properly?"* is an offer awaiting an answer, and acting on it
+    would answer the owner's question for them.
+    """
+    for sentence in re.split(r"(?<=[.!?\n])\s+", text or ""):
+        if sentence.rstrip().endswith("?"):
+            continue
+        if _INTENT_TO_ACT.search(sentence):
+            return True
+    return False
+
+
+def _unresolved_failure(results: list[Any]) -> Any | None:
+    """The last failure that nothing later put right, if there is one.
+
+    "Later succeeded" is judged per tool: `youtube.play` failing and then
+    `youtube.play` succeeding is resolved, while `youtube.play` failing and
+    `browser.restart` succeeding is progress but not an answer — the thing the
+    user asked for still has not happened.
+    """
+    succeeded_after: set[str] = set()
+    for result in reversed(results):
+        tool_id = str(getattr(result, "tool_id", ""))
+        outcome = str(getattr(getattr(result, "outcome", None), "value", "")) or str(
+            getattr(result, "outcome", "")
+        )
+        if getattr(result, "succeeded", False):
+            succeeded_after.add(tool_id)
+            continue
+        if outcome in _WORTH_ANOTHER_TRY and tool_id not in succeeded_after:
+            return result
+    return None
+
+
+def _unfinished_business(
+    text: str, results: list[Any], user_text: str = ""
+) -> str | None:
+    """Why this turn is not over yet, said to the model. None means it is over.
+
+    Three shapes end a turn dishonestly, and they are one situation: the reply
+    describes an action that nothing performed.
+
+    * **A promise.** *"I'll close it for you"* — true when said, false once the
+      turn ends. The model already knew how; it simply had no reason to carry
+      on, because stopping was allowed.
+    * **A completion claim nothing backs.** *"Done, Sir"* with no tool behind it.
+    * **A claim about the wrong action.** *"YouTube Music is now open and
+      playing"* with a verified `app.open` and nothing that can play anything.
+      This is why the check is per-claim rather than "did any tool verify
+      something" — one had.
+
+    The answer to all three is the same and it is not a rewrite: give the model
+    the facts and let it finish. Rewriting produces an honest account of a job
+    that did not get done, which is better than a dishonest one and worse than
+    doing the job.
+
+    Deliberately says nothing about *which* tool to call. Naming one here would
+    put the engine in the business of planning, and the model can already see
+    the catalogue.
+    """
+    from jarvis.llm.grounding import (
+        claims_completion,
+        promises_action,
+        unbacked_claims,
+    )
+
+    # A failure nobody dealt with. The strongest signal here and the only one
+    # that needs no guess about English at all.
+    #
+    # The owner's YouTube Music session, from the audit log:
+    #
+    #   17:02:35  youtube.play  failed  "Brave is already open, and a browser
+    #                                    that is already running cannot..."
+    #   -- turn ended; Jarvis said "I need to restart the browser first"
+    #   17:03:39  youtube.play  failed  "nothing has been searched for yet"
+    #   -- turn ended; Jarvis said "Let me proceed with that"
+    #
+    # Both failures name their own remedy, and the model said the right next
+    # step out loud each time. It stopped because stopping was allowed. Three
+    # exchanges that should have been one.
+    unresolved = _unresolved_failure(results)
+    if unresolved is not None:
+        return (
+            f"{unresolved.tool_id} failed: {getattr(unresolved, 'message', '')} "
+            "Nothing has been reported to the user yet and the turn is not over. "
+            "Deal with it now — call whatever tool fixes it and then try again, "
+            "or, if it cannot be fixed, say plainly what failed and why. Do not "
+            "answer with a description of what you would do next."
+        )
+
+    # Something the owner asked for that nothing has even attempted. Checked
+    # against the *request*, which is the one thing in the turn that is short,
+    # plain and not written by the model.
+    #
+    #   Sir: open YouTube music and play whatever song is in the queue.
+    #   Jarvis: YouTube Music is now open ... It's already playing the current
+    #           song. The application shows as running with process ID 4760.
+    #
+    # `app.open` had verified, nothing that can play anything had run, and the
+    # claim slipped every pattern watching the reply — a contraction and the
+    # word "already" were enough. The instruction did not slip: it said "play".
+    outstanding = outstanding_requests(user_text, results)
+    if outstanding:
+        return (
+            f"The user asked you to {', '.join(outstanding)} and no tool that "
+            "can do that has been called. Do it now — one tool call at a time, "
+            "in order. If you genuinely cannot, say which part you could not do "
+            "and why. Do not ask the user to confirm something they have "
+            "already asked for."
+        )
+
+    # No words at all. The model sometimes returns an empty message after a tool
+    # call; that used to end the turn and print a diagnostic, which the owner
+    # then had read aloud to them. An empty reply is not an answer, and if tools
+    # ran there is something to say about them.
+    if results and not (text or "").strip():
+        return (
+            "You returned no words. Say what happened, in one or two sentences "
+            "— or, if the request is not finished, carry on and finish it."
+        )
+
+    verified = tuple(
+        result
+        for result in results
+        if getattr(result, "succeeded", False)
+        and getattr(getattr(result, "verification", None), "value", "") == "verified"
+    )
+    unbacked = unbacked_claims(text, tuple(results))
+    # `promises_action` knows a closed list of action verbs and kept missing the
+    # real ones: "I'll **use** app.close", "I **need to** restart the browser
+    # first", "**Let me proceed** with that" — all narration instead of action,
+    # none of them matched. Rather than extend that list a fourth time, this is
+    # a deliberately loose net for *intent of any kind*, used only to decide
+    # whether to carry on.
+    #
+    # Gated on a tool having run, so it applies to a turn that is doing work and
+    # not to conversation. "I'll be here if you need me" is not a stalled task.
+    promised = promises_action(text) or (
+        bool(results) and _states_an_intention(text)
+    )
+    # Deliberately a wider net than the one `review_response` rewrites with.
+    # The two decisions have opposite costs: pushing back on a turn that was
+    # actually finished costs one model call and an "it is already done", while
+    # rewriting a true sentence tells the owner something false. So this is
+    # eager and the rewrite stays conservative.
+    #
+    # It is what catches "Done, Sir. The Microsoft Edge window is closed and
+    # verified." — no tool had run at all, and none of the narrower patterns
+    # match a bare "is closed", because that is also how a window listing
+    # legitimately reports state.
+    claimed_without_any_tool = (
+        claims_completion(text) or _SOUNDS_FINISHED.search(text or "") is not None
+    ) and not verified
+
+    if not (unbacked or promised or claimed_without_any_tool):
+        return None
+
+    if promised and not unbacked and not claimed_without_any_tool:
+        reason = (
+            "You said you would do it. Nothing has done it — saying so is not "
+            "doing it, and this turn ends after your next message."
+        )
+    elif unbacked:
+        reason = (
+            f"You described this as done: {', '.join(unbacked)}. No tool that "
+            "could have done it has run and confirmed it, so as far as the "
+            "computer is concerned it has not happened."
+        )
+    else:
+        reason = (
+            "You described an action as done and no tool confirmed anything."
+        )
+
+    return (
+        f"{reason} Call the tool that performs it now. If you cannot — because "
+        "there is no such tool, or because it failed, or because the user has "
+        "not permitted it — say that plainly instead, and say why. Do not "
+        "answer with another intention."
+    )
+
+
+def _round_ledger(results: list[Any]) -> str:
+    """State plainly what has changed on the computer, and what has not.
+
+    Every individual tool message is accurate and none of them can say this. A
+    listing reports a listing; only the turn as a whole knows that nothing was
+    closed. On 2026-08-06 that gap produced *"The MS Edge window has been closed
+    successfully"* on the back of two `window.list` calls, with Edge still open.
+
+    ``verified`` is the signal, and it means exactly the right thing now that
+    the invoker normalises read-only tools to ``not_applicable``: a verified
+    result is a state-changing tool that confirmed its own effect. Nothing else
+    counts as something having been done.
+    """
+    changed = [
+        getattr(result, "tool_id", "a tool")
+        for result in results
+        if getattr(result, "succeeded", False)
+        and getattr(getattr(result, "verification", None), "value", "") == "verified"
+    ]
+    if changed:
+        # De-duplicated: the same tool twice is one kind of change, not two.
+        unique = list(dict.fromkeys(changed))
+        return (
+            "Record of this turn: these tools changed something and confirmed "
+            f"it — {', '.join(unique)}. You may say those are done. Anything "
+            "else you were asked to do has not been done yet."
+        )
+    if results:
+        return (
+            "Record of this turn: nothing on the computer has been changed. The "
+            "tools that ran only read or listed things, which is not the same as "
+            "doing them. If the user asked for an action, call the tool that "
+            "performs it — do not describe the action as done."
+        )
+    return (
+        "Record of this turn: no tool has run, so nothing has been done. Do not "
+        "describe any action as completed."
+    )
+
+
+def _exhaustion_message(max_rounds: int, results: list[Any]) -> str:
+    """What to say when the round limit is reached (PRD FR-123).
+
+    The limit is a real stop and is reported as one. But the actions that
+    already ran are facts, and the ones that *changed something* are the facts
+    the user most needs, because those are the ones they would otherwise have to
+    discover by looking.
+
+    Only successful results are named. A failed one has already been reported
+    through its own result, and repeating it here would read as a second
+    failure.
+    """
+    # De-duplicated, keeping order. A model retrying the same call is *why* the
+    # limit was reached, so listing its result once per attempt is the common
+    # case — and eight identical lines is not eight facts, it is one fact with
+    # the useful part buried.
+    done: list[str] = []
+    for result in results:
+        if not getattr(result, "succeeded", False):
+            continue
+        line = (
+            f"{getattr(result, 'tool_id', 'a tool')}: "
+            f"{getattr(result, 'message', '')}"
+        ).strip(": ")
+        if line not in done:
+            done.append(line)
+    stopped = (
+        f"I stopped after {max_rounds} rounds of tool calls without reaching a "
+        "final answer, so nothing further was run (PRD FR-123)."
+    )
+    if not done:
+        return f"Nothing was completed. {stopped}"
+    return f"What did happen — {' | '.join(done)}. {stopped}"
 
 
 def _describe_result(result: Any) -> str:

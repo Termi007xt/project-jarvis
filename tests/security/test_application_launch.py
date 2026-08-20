@@ -302,3 +302,137 @@ def test_process_detection_finds_a_process_that_is_really_running() -> None:
 
     assert process_running(("python.exe",)) or process_running(("pytest.exe",))
     assert not process_running(("definitely-not-a-real-process-12345.exe",))
+
+
+# =========================================================================
+# "Open YouTube Music opens a tab" — and reported verified success anyway
+# =========================================================================
+def _music_entry() -> "ApplicationEntry":
+    from jarvis.toolbox.launch import ApplicationEntry, ArgumentKind, LaunchKind
+
+    return ApplicationEntry(
+        app_id="youtube_music",
+        display_name="YouTube Music",
+        kind=LaunchKind.EXECUTABLE,
+        target=r"C:\Program Files\Brave\chrome_proxy.exe",
+        fixed_arguments=("--profile-directory=Default", "--app-id=abc123"),
+        argument_kind=ArgumentKind.NONE,
+        verify_process_names=("brave.exe",),
+    )
+
+
+def test_a_launch_is_not_verified_by_a_process_that_was_already_running(monkeypatch) -> None:
+    """The defect behind "Open YouTube Music opens a tab" reporting success.
+
+    `youtube_music` verifies against `brave.exe`. Brave is almost always already
+    running, so `process_running` returned true whether or not an app window ever
+    opened, and every launch recorded `succeeded / verified`. The audit log said
+    the effect was confirmed while nothing about the effect had been observed.
+
+    The rule this encodes: **a verification target must be able to distinguish
+    "my effect happened" from "something unrelated was already true."**
+    """
+    from jarvis.toolbox import launch as launch_module
+
+    monkeypatch.setattr(launch_module, "launch_argv", lambda argv: 4321)
+    # Running before the launch, and still running after it. Which is exactly
+    # what Brave looks like on a machine where the user already had it open.
+    monkeypatch.setattr(launch_module, "process_running", lambda names: True)
+
+    outcome = launch_module.launch(
+        _music_entry(), verify_timeout_seconds=0.2, poll_seconds=0.01
+    )
+
+    assert outcome.started, "the launch itself still happened"
+    assert not outcome.verified, (
+        "brave.exe was already running before this launch, so observing it "
+        "afterwards is not evidence that this launch did anything"
+    )
+    assert "already running" in outcome.detail.lower(), (
+        "the reason has to reach the user, not just the boolean"
+    )
+
+
+def test_the_planner_can_see_which_applications_exist() -> None:
+    """Defect 2: the model called `web.open_url` for "open YouTube Music".
+
+    Both tools are catalogued and both look plausible, and nothing in `app.open`'s
+    schema told the planner that YouTube Music *is* an application it can open.
+    Handing a URL to a browser opens a tab by definition, so the launcher was
+    never involved and the app-id vector was never at fault.
+
+    The allow-list has to be visible at the moment the tool is chosen, not only
+    enforced after it has been chosen wrongly.
+    """
+    from jarvis.toolbox.launch import default_catalogue
+    from jarvis.toolbox.phase1_tools import OpenApplicationTool
+
+    catalogue = default_catalogue()
+    schema = OpenApplicationTool(catalogue).spec.json_schema_for_model()
+    rendered = str(schema).casefold()
+
+    for app_id in catalogue.ids():
+        assert app_id in rendered, (
+            f"'{app_id}' is approved but invisible to the planner, which is how "
+            "it ends up guessing a tool instead of naming an entry"
+        )
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    ["youtube-music", "youtube_music", "YouTube  Music", "  yt music  ", "YOUTUBE MUSIC"],
+)
+def test_an_application_resolves_however_the_model_punctuates_it(spoken: str) -> None:
+    """Defect 3: `youtube-music` was refused as an unknown application.
+
+    The model guesses separators — hyphen, underscore, space — and a catalogue
+    that only matches one of them turns a correct intention into
+    `unknown_application`. This is not laxity: resolution is still restricted to
+    ids, display names and declared aliases, never to a path (constraint 3).
+    """
+    from jarvis.toolbox.launch import default_catalogue
+
+    catalogue = default_catalogue()
+    assert catalogue.resolve(spoken) is catalogue.get("youtube_music")
+
+
+def test_an_unsupported_argument_says_what_can_be_done_instead() -> None:
+    """Defect 3: "play Sunflower on YouTube Music" failed with only a refusal.
+
+    ADR-0010: an honest failure names what is *not* possible and what is. Saying
+    only "does not take an argument" leaves the user, and the model, with no next
+    move — and invites the model to retry the same call.
+    """
+    from jarvis.toolbox.launch import CatalogueError, default_catalogue, launch
+
+    entry = default_catalogue().get("youtube_music")
+    assert entry is not None
+
+    with pytest.raises(CatalogueError) as raised:
+        launch(entry, "Sunflower")
+
+    message = str(raised.value).casefold()
+    assert "sunflower" in message, "say what was refused"
+    assert "open" in message, "and say what it can still do"
+
+
+def test_a_launch_is_verified_when_the_process_appears_because_of_it(monkeypatch) -> None:
+    """The honest positive case must still work, or the fix is just pessimism."""
+    from jarvis.toolbox import launch as launch_module
+
+    observations: list[bool] = []
+
+    def fake_process_running(names: tuple[str, ...]) -> bool:
+        # Absent on the pre-launch check, present on every poll afterwards.
+        observations.append(True)
+        return len(observations) > 1
+
+    monkeypatch.setattr(launch_module, "launch_argv", lambda argv: 999)
+    monkeypatch.setattr(launch_module, "process_running", fake_process_running)
+
+    outcome = launch_module.launch(
+        _music_entry(), verify_timeout_seconds=2.0, poll_seconds=0.01
+    )
+
+    assert outcome.started and outcome.verified
+    assert outcome.pid == 999

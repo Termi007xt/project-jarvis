@@ -101,6 +101,33 @@ class OpenApplicationTool:
 
     def __init__(self, catalogue: ApplicationCatalogue) -> None:
         self._catalogue = catalogue
+        # The allow-list has to be visible when the tool is *chosen*, not only
+        # enforced after it has been chosen wrongly. Asked to "open YouTube
+        # Music", the model called `web.open_url` with music.youtube.com —
+        # which opens a tab by definition — because nothing in this schema said
+        # YouTube Music was an application it could open. Naming the entries is
+        # not a widening: the model still chooses an entry, never a binary
+        # (ADR-0029 constraint 3).
+        entries = ", ".join(
+            f"{entry.app_id} ({entry.display_name})" for entry in catalogue.entries()
+        )
+        self.spec = type(self).spec.model_copy(
+            update={
+                "description": (
+                    "Open an application the user has already approved, and "
+                    "nothing more — it cannot search, type or choose anything "
+                    f"inside what it opens. Approved entries: {entries or 'none'}. "
+                    "Prefer this over any web tool when the user names one of "
+                    "these and only wants it opened, even where the application "
+                    "also has a website — opening the site gives them a browser "
+                    "tab, not the application they asked for. But when the "
+                    "request also says what to do once it is open, such as "
+                    "searching for something, use the tool that does that whole "
+                    "job instead: it opens what it needs by itself, and opening "
+                    "the application first can stop it from working."
+                )
+            }
+        )
 
     def run(self, context: ToolContext, parameters: BaseModel) -> ToolExecution:
         assert isinstance(parameters, OpenApplicationInput)
@@ -372,7 +399,15 @@ class MediaControlTool:
     spec = ToolSpec(
         tool_id="media.control",
         version="1.0.0",
-        description="Play, pause, skip or stop whatever is currently playing.",
+        description=(
+            "Play, pause, skip or stop whatever is currently playing, using the "
+            "media keys on the keyboard. This is how to control an application "
+            "that is already open and playing — YouTube Music, Spotify, a video "
+            "in a browser tab — and it is the right tool for 'play the current "
+            "song', 'pause', 'next track' and 'resume'. It works whatever is "
+            "playing and needs no search first. Note that play_pause is a "
+            "toggle: if something is already playing, it will stop it."
+        ),
         input_model=MediaControlInput,
         output_model=MediaControlOutput,
         risk=RiskLevel.LOW,

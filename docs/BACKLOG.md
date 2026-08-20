@@ -356,13 +356,66 @@ close, recorded here rather than left in a session transcript:
 | Item | Origin | Note |
 |---|---|---|
 | Voice interruption does not work on real hardware | Acceptance 8.3 | Shipped as `duplex_mode: half`, which FR-015 permits and the GUI states. `Ctrl+Alt+End` and tray **Stop speaking** work. Needs a measurement, not a rewrite |
-| "Open YouTube Music" opens a tab, not the installed app | Acceptance 5 | The app-id vector is correct and tested; the `chrome_proxy.exe` route did not take effect on this machine. Likely the profile directory or the app id |
+| "Open YouTube Music" opens a tab, not the installed app | Acceptance 5 | **Diagnosed 2026-08-04 from the audit log — it is three defects, and none of them is the app id.** See §4.6.1 |
 | No time or date capability | Acceptance 3 | The most obvious question to ask a voice assistant, and it can only be answered from the model, which cannot know. A small verifiable tool |
 | Arbitrary application launching with first-use permission | Owner request, 2026-08-04 | Deferred for stability. Needs its own ADR: Start-menu discovery as the executable source, approval on first use, persisted entries, a `.lnk` parser that runs nothing. ADR-0029 constraint 3 is preserved by construction |
 | Progress speech during long work (FR-033) | P1-AUD-09 | Not built. Matters once Phase 2 has work long enough to report progress on |
 | Spoken notifications by event type (FR-181) | P1-UI-03 | Notifications ship; choosing which are spoken does not |
 | Per-user wake enrolment (ADR-0016 Path 1) | P1-AUD-01 | Measurement types, threshold fitting and the quality bar exist and are tested; the recording flow and personal verifier do not |
 | Startup entry is named `pythonw.exe` | Acceptance 10 | Correct behaviour for a source checkout — there is no executable to name yet. Phase 6 packaging (ADR-0013, ADR-0022) resolves it |
+
+### 4.6.1 "Open YouTube Music opens a tab" — diagnosed 2026-08-04
+
+Recorded because the original hypothesis was wrong and a wrong hypothesis in a
+backlog costs more than no hypothesis. This entry previously read *"likely the
+profile directory or the app id."* All three candidate causes were checked
+against the machine and eliminated:
+
+- The installed PWA is `cinhimbnkkaeohfgghhklpknlkffjgod` — **identical** to
+  `_YOUTUBE_MUSIC_APP_ID` in `jarvis/toolbox/launch.py`.
+- It is installed under the `Default` profile, which is what the entry passes.
+- The Start-menu shortcut's own target and arguments are **byte-for-byte
+  identical** to the vector `build_argv` produces.
+
+The catalogue entry is correct. What the audit log shows instead:
+
+| # | Defect | Evidence | Where it is fixed |
+|---|---|---|---|
+| 1 | **The verification is vacuous.** The entry declares `verify_process_names=("brave.exe",)`, and Brave is usually already running, so `process_running` returns true whether or not an app window opened | Every `app.open` for YouTube Music recorded `succeeded / verified`, which proves nothing about the effect | Needs **window-level** verification, i.e. UI Automation. P2-WIN-08. Until then the entry must not claim `verified` |
+| 2 | **The model called the wrong tool.** On acceptance day it invoked `web.open_url` with `https://music.youtube.com`. A URL handed to a browser opens a tab by definition; `app.open` was never involved | `2026-08-04T05:52:49 tool=web.open_url {"url": "https://music.youtube.com"} → succeeded/verified` | The tool schema does not tell the planner *which* applications exist, so it cannot know YouTube Music is openable as an app |
+| 3 | **Alias and argument brittleness** | `{"application": "youtube-music"}` → `unknown_application`; `{"application": "YouTube Music", "argument": "Sunflower"}` → *"does not take an argument"* | Catalogue-driven valid values in the schema; an honest failure message that says what *can* be done |
+
+Defect 1 is the one that matters beyond this feature. It is the third instance of
+the same family — Phase 1 shipped `voice.speak` reporting verified success for a
+silent room, and `app.open` reporting a launch it had not observed. **A tool that
+verifies against a condition it does not control is not verifying.** The rule this
+adds: a verification target must be able to distinguish "my effect happened" from
+"something unrelated was already true."
+
+#### Defect 4, found by accepting stage 0 — the likeliest original cause
+
+The owner reported on 2026-08-04 that **YouTube Music now opens correctly as an
+app.** Nothing in the stage 0 fix could have caused that: the verification change
+altered only what Jarvis *reports*, never what it launches.
+
+What did change is that the CDP spikes left **Brave closed**. That gives a fourth
+and better hypothesis than any of the original three:
+
+> With no Brave instance running, `chrome_proxy.exe --profile-directory=Default
+> --app-id=<id>` starts the browser fresh and it honours the app id. With Brave
+> already running, the second process hands its command line to the existing
+> instance, and that instance opens a **tab** rather than an app window.
+
+If that holds it explains the whole defect, and it generalises: **an entry whose
+launch is handed off to a running instance may not do what its argument vector
+says.** Two consequences for Phase 2:
+
+- It is testable directly — open Brave, ask for YouTube Music, observe a tab;
+  close Brave, ask again, observe the app. Recorded as an acceptance item.
+- It reinforces defect 1 rather than replacing it. Process-presence verification
+  cannot distinguish these two outcomes *at all*, which is why the defect
+  survived acceptance in the first place. Window-level verification (P2-WIN-08)
+  can, and must.
 
 ---
 
@@ -399,35 +452,35 @@ and recovery exist to back them.
 | ID | Item | PRD refs | Depends on | Size | Status |
 |----|------|----------|------------|------|--------|
 | P2-WIN-01 | Application catalogue: scan safe registries/Start menu, present for approval; manual mapping GUI | FR-060, FR-061, FR-062, FR-063 | P1-APP-01 | L | Not started |
-| P2-WIN-02 | UI Automation inspector: accessible name, control type, automation ID, patterns | FR-071 | P0-COR-04 | L | Not started |
-| P2-WIN-03 | Automation worker thread; pywinauto UIA backend integration | §12.2 | P0-COR-06 | XL | Not started |
-| P2-WIN-04 | Input ownership: acquire `foreground_desktop` lock before mouse/keyboard | FR-077 | P2-WIN-03, P0-TSK-03 | M | Not started |
-| P2-WIN-05 | User-interruption pause: mouse/keyboard activity pauses the task | FR-078, AT-008 | P2-WIN-04 | M | Not started |
-| P2-WIN-06 | Secure-desktop and UAC-prompt avoidance; password-field avoidance | FR-079, FR-080 | P2-WIN-03 | M | Not started |
-| P2-WIN-07 | Sensitive-application blocklist for automation and screenshot capture | FR-081, AT-031 | P2-WIN-03 | M | Not started |
-| P2-WIN-08 | Window discovery: process, identity, title, UIA properties, monitor, state | FR-240 | P2-WIN-02 | M | Not started |
-| P2-WIN-09 | Window actions: activate, minimise, maximise, restore, move, resize, snap, monitor placement | FR-241, FR-242, FR-243 | P2-WIN-08 | L | Not started |
-| P2-WIN-10 | Screenshot capture scoped to window/monitor/region; visible capture indication | FR-073, FR-271, FR-272 | P2-WIN-03 | M | Not started |
-| P2-WIN-11 | Active-window screen-context request (basic "what's on my screen") | FR-270 (partial) | P2-WIN-10, P1-LLM-01 | M | Not started |
-| P2-APP-01 | Normal close before force; unsaved-work-dialog detection and pause | FR-065, FR-066, AT-004 | P2-WIN-02 | M | Not started |
-| P2-APP-02 | Force-close: explicit confirmation required every time | FR-067, AT-005 | P2-APP-01 | S | Not started |
-| P2-BRW-01 | Dedicated persistent "Jarvis" Brave automation profile | FR-056 | P1-BRW-01 | M | Not started |
-| P2-BRW-02 | Playwright visible-browser integration; DOM-first execution | FR-072, §12.1 | P2-BRW-01 | XL | Not started |
+| P2-WIN-02 | UI Automation inspector: accessible name, control type, automation ID, patterns | FR-071 | P0-COR-04 | L | Partial — inspector exists; not yet a tool |
+| P2-WIN-03 | Automation worker thread; pywinauto UIA backend integration | §12.2 | P0-COR-06 | XL | Partial — worker thread and UIA backend exist |
+| P2-WIN-04 | Input ownership: acquire `foreground_desktop` lock before mouse/keyboard | FR-077 | P2-WIN-03, P0-TSK-03 | M | Done |
+| P2-WIN-05 | User-interruption pause: mouse/keyboard activity pauses the task | FR-078, AT-008 | P2-WIN-04 | M | Done |
+| P2-WIN-06 | Secure-desktop and UAC-prompt avoidance; password-field avoidance | FR-079, FR-080 | P2-WIN-03 | M | Done |
+| P2-WIN-07 | Sensitive-application blocklist for automation and screenshot capture | FR-081, AT-031 | P2-WIN-03 | M | Done |
+| P2-WIN-08 | Window discovery: process, identity, title, UIA properties, monitor, state | FR-240 | P2-WIN-02 | M | Done |
+| P2-WIN-09 | Window actions: activate, minimise, maximise, restore, move, resize, snap, monitor placement | FR-241, FR-242, FR-243 | P2-WIN-08 | L | Done |
+| P2-WIN-10 | Screenshot capture scoped to window/monitor/region; visible capture indication | FR-073, FR-271, FR-272 | P2-WIN-03 | M | Done |
+| P2-WIN-11 | Active-window screen-context request (basic "what's on my screen") | FR-270 (partial) | P2-WIN-10, P1-LLM-01 | M | Done |
+| P2-APP-01 | Normal close before force; unsaved-work-dialog detection and pause | FR-065, FR-066, AT-004 | P2-WIN-02 | M | Done |
+| P2-APP-02 | Force-close: explicit confirmation required every time | FR-067, AT-005 | P2-APP-01 | S | Done |
+| P2-BRW-01 | Dedicated persistent "Jarvis" Brave automation profile | FR-056 | P1-BRW-01 | M | Done |
+| P2-BRW-02 | Playwright visible-browser integration; DOM-first execution | FR-072, §12.1 | P2-BRW-01 | XL | Done |
 | P2-BRW-03 | Browser session control: clear profile, cookies, site permissions | FR-057 | P2-BRW-01 | S | Not started |
-| P2-BRW-04 | CAPTCHA / anti-bot pause-and-request-user | FR-058 | P2-BRW-02 | M | Not started |
+| P2-BRW-04 | CAPTCHA / anti-bot pause-and-request-user | FR-058 | P2-BRW-02 | M | Partial — CAPTCHA pause exists |
 | P2-BRW-05 | Internet research: search modes, explicit network indicator, sourced summaries | FR-050, FR-051, FR-053 | P2-BRW-02 | L | Not started |
-| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Not started |
+| P2-BRW-06 | Untrusted web-content wrapping; prompt-injection adversarial test | FR-054, AT-007 | P2-BRW-02, P0-SEC-03 | L | Done |
 | P2-BRW-07 | AI website prompting adapter (Gemini/ChatGPT-class sites) | FR-055 | P2-BRW-01 | M | Not started |
-| P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Not started |
+| P2-BRW-08 | YouTube search and indexed result selection with verified playback | FR-090, FR-091, AT-006 | P2-BRW-02 | L | Done |
 | P2-BRW-09 | YouTube Music search; ambiguous-match clarifying question | FR-092, FR-093 | P2-BRW-08 | M | Not started |
-| P2-FS-01 | Windows Known Folder resolution via Windows APIs | FR-190, AT-019 | P0-COR-04 | S | Not started |
-| P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Not started |
-| P2-FS-03 | Local file search in approved scope; match ranking | FR-192, FR-193 | P2-FS-01 | L | Not started |
+| P2-FS-01 | Windows Known Folder resolution via Windows APIs | FR-190, AT-019 | P0-COR-04 | S | Done |
+| P2-FS-02 | File Explorer control: open/select/reveal/navigate/sort/filter | FR-191 | P2-FS-01 | M | Partial — reveal/select done; navigate, sort, filter not |
+| P2-FS-03 | Local file search in approved scope; match ranking | FR-192, FR-193 | P2-FS-01 | L | Done |
 | P2-FS-04 | Ambiguous-file disambiguation dialog | FR-194, AT-020 | P2-FS-03 | M | Not started |
-| P2-FS-05 | Open file (configured/default/user-selected app) with verification; worked example | FR-195, FR-207, FR-209, AT-021 | P2-FS-04 | M | Not started |
-| P2-FS-06 | Filesystem tool scoping and path validation (symlinks, junctions, env vars) | FR-208, FR-204, AT-022 | P2-FS-01 | L | Not started |
-| P2-COR-01 | Honest-completion enforcement exercised against real verifiable actions | FR-048 (continued), AT-018 | P1-COR-02, P2-APP-01, P2-FS-05 | M | Not started |
-| P2-TST-01 | Phase 2 acceptance-test suite wiring | AT-004…AT-009, AT-018…AT-022, AT-031 | (all Phase 2 items) | M | Not started |
+| P2-FS-05 | Open file (configured/default/user-selected app) with verification; worked example | FR-195, FR-207, FR-209, AT-021 | P2-FS-04 | M | Done — approved apps only (ADR-0034) |
+| P2-FS-06 | Filesystem tool scoping and path validation (symlinks, junctions, env vars) | FR-208, FR-204, AT-022 | P2-FS-01 | L | Done |
+| P2-COR-01 | Honest-completion enforcement exercised against real verifiable actions | FR-048 (continued), AT-018 | P1-COR-02, P2-APP-01, P2-FS-05 | M | Done |
+| P2-TST-01 | Phase 2 acceptance-test suite wiring | AT-004…AT-009, AT-018…AT-022, AT-031 | (all Phase 2 items) | M | Done |
 
 ### 5.4 Tests to add in this phase
 

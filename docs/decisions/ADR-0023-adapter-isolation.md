@@ -1,8 +1,9 @@
 # ADR-0023: Adapter Isolation
 
-- **Status:** Open — decision required before Phase 2
-- **Date:** 2026-08-01
+- **Status:** **Accepted** (Option A with mandatory mitigations, decided 2026-08-04 by the project owner)
+- **Date:** 2026-08-01, decided 2026-08-04
 - **Deciders:** Project owner
+- **Phase:** 2
 - **PRD reference:** §25.13, FR-150, NFR-040; also ARCHITECTURE.md §13 gap 2, §8
 - **Decision required before:** Phase 2 (first real application adapters ship: Brave, YouTube, Xbox; the Automation Worker becomes load-bearing)
 
@@ -33,7 +34,33 @@ A middle ground: keep low-risk, well-understood adapters (e.g. simple "open appr
 
 ## Decision
 
-Deferred. No option is selected yet. Option A (in-process) is the correct posture through Phase 0–1, since ARCHITECTURE.md §4.1 already commits to this and no adapters exist yet to isolate; the decision must close before Phase 2, when the first real adapters and the Automation Worker itself become load-bearing and start processing genuinely untrusted content.
+**Option A — adapters and the Automation Worker remain in-process for Phase 2 — accepted with mandatory mitigations.** Decided by the project owner on 2026-08-04.
+
+This closes the decision rather than deferring it again. The distinction matters: ARCHITECTURE.md §13 gap 2 has been carrying "in-process isolation is not a security boundary" as an open item since Phase 0, and Phase 2 is where the automation worker starts doing real things. An accepted decision with named mitigations and a named revisit trigger is a different artefact from an unresolved one.
+
+### Why Option A, and not B
+
+The ADR's own criterion 1 asks whether the `AppAdapter` interface has stabilised enough that Option B's IPC and serialisation cost is not fighting a still-changing contract. It has not. No adapter exists yet beyond the Phase 1 launcher; the UIA and browser adapters are being written *during* Phase 2. Paying a cross-process boundary against an interface that is still being discovered would make the boundary the phase's dominant engineering effort and would freeze the contract at its least-informed moment.
+
+Option C was rejected for a narrower reason: it requires a maintained classification of which adapters are "high risk enough" to isolate, and that classification drifts silently as adapters gain capabilities. Two execution models is more total complexity than one, and the risk classification is the part most likely to rot.
+
+### Mandatory mitigations
+
+Option A is accepted *with* these, not instead of them. They are what make the residual risk bounded rather than open-ended, and they are requirements on Phase 2 work items:
+
+1. **The automation worker receives no vault handles.** No `Database`, no secret store, no `AuditLog` write handle is passed into adapter code. Adapters report through typed results that the invoker records.
+2. **External content crosses only as a typed `Observation`** — untrusted by construction, with no code path that produces page, screen or filename text unwrapped (stage 1, P2-BRW-06).
+3. **Selection is positional, never textual.** An adapter chooses among structured results by index; it never resolves an action by matching page-supplied text. This is what stops a page that can rename itself from redirecting an action.
+4. **Every adapter action goes through `ToolInvoker`.** There is no adapter-private path to an effect.
+
+### Revisit trigger, stated so it is not left to memory
+
+This decision is revisited when **either** of the following becomes true, whichever comes first:
+
+- The `AppAdapter` interface has been stable across a full phase — criterion 1's condition, which Phase 3 is the earliest opportunity to meet.
+- Phase 5's IDE orchestration begins, where FR-154 requires an adapter that must never auto-approve terminal commands or credential access. That adapter's risk profile is materially worse than a browser's and Option C's argument becomes strong for it specifically.
+
+Until then, ARCHITECTURE.md §13 gap 2 stands as a **recorded residual risk with an owner-accepted rationale**, not as an unexamined gap.
 
 ## Decision criteria
 

@@ -4,6 +4,364 @@ All notable changes to Project Jarvis are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phase 2: deterministic desktop and browser automation
+
+In progress. Stage 0 (measure and unblock) is complete; no automation capability
+has shipped yet.
+
+### Added
+
+- **Jarvis can find your files** (`files.find`, `files.reveal`, FR-190 … FR-193,
+  FR-208). It searches the folders Windows itself reports as yours — asked
+  through `SHGetKnownFolderPath`, not guessed as `%USERPROFILE%\Documents`,
+  which is wrong on any machine where Documents lives in OneDrive. Results come
+  back numbered, and "show me the second one" opens File Explorer with that file
+  selected. **Neither tool takes a path**: the model gets numbers and hands a
+  number back, so there is nothing for a malicious filename to redirect. Paths
+  are resolved to a real location before the approved-folder boundary is
+  checked, so `..`, environment variables, symlinks and junctions are all
+  compared by where they actually lead. It does not read what is inside a file —
+  that is a later phase, and nothing here pretends otherwise.
+
+- **Jarvis can photograph the screen, visibly** (`screen.capture`, FR-073,
+  FR-271, FR-272). You are always shown that a capture is happening, and the
+  notice is raised before the picture is taken rather than after. If nothing can
+  show that notice, the tool does not exist at all — not a tool that captures
+  quietly. Windows belonging to applications on the sensitive list are filled
+  black before anything reaches disk, because the blocklist guards *automation*
+  and cannot guard a camera pointed at the whole screen. Jarvis never chooses
+  where the file goes: the path is composed inside the vault, so the tool cannot
+  become a way to write a file anywhere else. Only the newest 20 captures are
+  kept.
+- **Jarvis can say what you are looking at** (`screen.active_window`, FR-270 in
+  part). Which application is in front, and a reference so "close this" and
+  "move this to the left" work without listing first. It states plainly that it
+  **cannot read the contents** of the screen — that needs vision support planned
+  for Phase 4, and a description assembled from a window title would be
+  invention dressed as observation.
+- **Jarvis can see and arrange your windows** (`window.list`, `window.arrange`,
+  FR-240 … FR-243). Bring a window forward, minimise, maximise, restore, snap to
+  a half, or move it exactly. Two tools rather than one, because reading which
+  windows are open and taking the foreground away from what you are doing are
+  different risks: listing is low and holds no lock, arranging is medium and
+  owns the desktop first. A window is named by a reference the listing hands
+  out, never by its title, so a window cannot retarget an action by renaming
+  itself. Snapping works the geometry out from the real screen rather than from
+  a guess. Only windows a person would recognise as open are listed — no caption,
+  cloaked, tool, owned and zero-area windows are left out, filtered on Win32
+  attributes rather than on a list of names that would be both incomplete and
+  defeatable.
+- **Jarvis can close an application, and stops when it objects** (`app.close`,
+  FR-065, FR-066, AT-004). The request is the same one clicking the X sends, so
+  an application with unsaved work does what it should: it puts a save prompt
+  up. Jarvis notices structurally — a new dialog from the same process — and
+  stops there, leaving the prompt for you. It deliberately does not read the
+  dialog to decide, because that text is written by the application being
+  closed, and a "Save changes?" prompt is the single place where believing what
+  a window says about itself would cost the most.
+- **Force-close exists, separately, and asks every time** (`app.force_close`,
+  FR-067, AT-005). The first high-risk tool in the product: fresh confirmation
+  every time, no standing grant ever. A refused normal close never escalates to
+  it on its own, and there is no `force` flag on `app.close` — reaching it is a
+  decision a person makes, which a separate tool requires and a parameter would
+  not.
+- **Automation refuses windows that should not be touched** (FR-079, FR-081,
+  AT-031). Credential managers, the Windows consent and logon surfaces, and any
+  window whose own title names a secret. The refusal keys on process identity,
+  which comes from the operating system; a window title may only *add* a
+  refusal and never remove one, or the way past the password-manager blocklist
+  would be for the application to rename itself. Sensitive windows are still
+  listed, with their titles withheld, so Jarvis can say why it will not act.
+  Nothing is automated at all while Windows is showing a UAC prompt, the lock
+  screen or Ctrl+Alt+Del.
+- **Jarvis can close and reopen the browser itself** (`browser.restart`,
+  ADR-0032). It had been offering to do this for some time — *"Closing Brave
+  briefly then reopening will restore your tabs"* — with no capability behind
+  the offer, so the only way forward was quitting Brave by hand. The browser is
+  *asked* to close rather than killed, so Chromium writes its session out and the
+  tabs come back; a browser that will not close (a page asking to confirm
+  leaving) is reported as a failure rather than forced shut, because that prompt
+  is yours to answer. Its own approval, deliberately not folded into the search
+  tools: approving a search is not approving the loss of your windows.
+- **Browser automation can be allowed once instead of every time.** "Allow
+  always" is now offered for it in the approval dialog (ADR-0032). Nothing is
+  granted automatically — you still choose it, it appears on the Permissions
+  screen, and you can revoke it there. Configured by name in
+  `permissions.always_allowable_capabilities`; no other medium-risk capability
+  is affected and high-risk ones can never be listed.
+
+- **Jarvis can open a file** (`files.open`, FR-195, ADR-0034) — with an
+  application the user has already approved, never with the Windows default
+  association. That association is chosen by a registry the user's own software
+  rewrites, and several defaults (`.hta`, `.ps1`, `.scr`, `.url`) run code, so
+  "open with the default app" is a generic execution primitive wearing a helpful
+  name. A short table says which approved application opens which kind of file;
+  anything else is refused with a list of what *is* possible. A file whose name
+  begins with a dash or slash is refused rather than escaped — that is the whole
+  of argv injection, and escaping is a claim about a parser we do not own.
+
+### Security
+
+- **Every untrusted surface is now exercised by the same adversarial corpus**
+  (P2-BRW-06, AT-007). Twelve payloads — instruction override, forged system
+  turns, forged tool calls, wrapper escape, zero-width and direction-override
+  characters, homoglyphs, and sheer length — run against every content class
+  Jarvis can observe, not just the web results the original test used. Phase 2
+  tripled the number of surfaces that carry somebody else's words (window
+  titles, file names) and each was added on a different day; a test now fails if
+  a new content class appears that the corpus does not cover, because
+  "we remembered on the day" is not a security argument.
+- **File names are carried as `file_name` content**, not as generic UI text. The
+  class already existed and the new search was not using it.
+
+### Known limitations
+
+- **Opening the browser wakes the owner's other tabs, and YouTube tabs among
+  them start playing.** Playwright attaches to every page in the browser — ten
+  of ten, measured — because it is built to drive a browser it owns, and
+  ADR-0019 Option D points it at one in daily use. There is no option to narrow
+  the attach, so this cannot be fixed above Playwright. The replacement is
+  spiked and proven (`tools/browser-lab/test_single_tab_cdp.py`: one tab over
+  raw CDP, three decoy videos left untouched) and deferred by the owner rather
+  than allowed to hold up the phase. Search and play work correctly meanwhile.
+
+### Changed
+
+- **Nine more applications Jarvis can open**: Microsoft Edge, Notepad, File
+  Explorer, Discord, WhatsApp, Settings, Camera, Microsoft Store and Calculator.
+  Every path and app id was checked against a real machine rather than guessed.
+  This widens the *catalogue*, which is the thing designed to be widened — each
+  entry is still a fixed argument vector going through the single launch call
+  site, the interpreter denylist and the same permission check, and there is
+  still no way to name a binary that is not an entry.
+- **A turn checks the request against what actually ran.** "Open YouTube Music
+  and play whatever is in the queue" is two instructions, and the turn now
+  notices when nothing capable of the second one was ever called — rather than
+  trying to catch the model saying "it's already playing". Attempted counts, not
+  just succeeded, so a close that stopped on a save prompt is reported rather
+  than tried again.
+- **A one-second settle after a step that changed something**, so an
+  application has time to appear before the next step looks for its window.
+- **A turn now finishes its work before it answers** (ADR-0033). Jarvis used to
+  stop the moment it produced words instead of a tool call, so *"I'll close it
+  for you"* ended the turn as surely as actually closing it did. A reply that
+  promises an action, claims one nothing verified, or claims a *different*
+  action from the one performed now goes back to the model with a record of what
+  did and did not change, up to three times, before the turn is allowed to end.
+  Still bounded: when the attempts run out the reply says plainly that the work
+  did not happen, because a loop that only exits on success is a hang.
+- **A failed tool no longer ends the turn.** `youtube.play` failing with "Brave
+  is already open" — a failure that names its own remedy — used to stop
+  everything and report it, and the model would helpfully describe the restart
+  it was about to do and then not do it. A failure nothing has put right means
+  the request has not been carried out, so the turn works past it. A **denied**
+  permission is never retried: that is the user saying no, and asking again
+  would be worse than the problem.
+- **A reply that says what it is about to do keeps the turn going.** The check
+  used to need a known action verb, so "I'll **use** app.close", "I **need to**
+  restart the browser first" and "**Let me proceed**" all read as finished
+  answers. Any statement of intent now counts, while the turn is doing work.
+- **An empty reply is no longer explained to the user.** A model that returned
+  no words after running tools produced a diagnostic listing its own tool calls,
+  which was then read aloud. The turn asks for an answer instead.
+- **A verified tool only supports claims about what that tool does.** *"YouTube
+  Music is now open and playing the current song"* was accepted because
+  `app.open` had genuinely verified — while nothing capable of playing anything
+  had run at all. Claims are now matched against the tools that could have
+  produced them. A verified tool the mapping does not recognise is never
+  contradicted: it might be the one that did the work.
+
+### Fixed
+
+- **"It was closed successfully" was not recognised as a claim that anything
+  had been closed.** The check knew *"has been closed"* and *"is now closed"*
+  and not the plain past passive, and knew *"successfully closed"* but not
+  *"closed successfully"* — so the same sentence was hedged or waved through
+  depending on how the model happened to phrase it. Both spellings are covered
+  now. The bare present state, "MS Edge is closed", deliberately still is not:
+  that is what a window listing legitimately reports, and hedging the answer to
+  "what's open?" would teach the reader to skip the hedge.
+- **The test suite spoke out loud and loaded the speech models to do it.** Three
+  UI tests simulated a spoken command, which is answered aloud by design, and
+  asserted on something else — so they ran all the way through Kokoro to the
+  sound card, pulling torch into memory with it. No UI test opens the speakers
+  now, enforced once for all of them rather than fixture by fixture.
+- **A reply could claim an action was done on the strength of an unrelated
+  listing.** Asked to close Microsoft Edge, Jarvis called `window.list`, saw
+  Edge in the results, and answered "The MS Edge window has been closed
+  successfully" — twice, marked *confirmed by a tool*, with Edge still open and
+  no close tool ever called. The check that exists to stop exactly this asks
+  whether any tool result was verified, and is sound only because read-only
+  tools report *nothing to verify*; `window.list` declared itself read-only and
+  reported *verified*, so verifying that it had listed some windows was read as
+  licence to claim a window had been closed. A tool that changes nothing now has
+  nothing to verify, enforced where every action passes through rather than
+  tool by tool.
+- **The model could describe an action instead of performing it.** Each round of
+  tool calls now ends with a plain record of what changed, and in particular of
+  what did not: individual tool results are each accurate and none of them can
+  report an absence, which is the gap the false claim grew in.
+- **Closing an application could report success while it was still open.**
+  Closing Microsoft Edge with a tab that asks before leaving said *"Microsoft
+  Edge has been closed"* — verified — with Edge still on screen. The check asked
+  whether the window was still in the window list, but that list answers *would
+  a person call this open*, and deliberately leaves out the invisible, the
+  untitled and the cloaked; Chromium hides its window while it asks you to
+  confirm, so it left the list while entirely alive. Closing now asks Windows
+  whether the window still exists, which is a different question from whether it
+  is still on screen. A window that exists but has gone off screen is reported
+  as still running and possibly asking you something — never as closed, and
+  never as "still open with nothing asking", because Chromium draws that prompt
+  inside the page where nothing outside can see it.
+- **Speech models reached the network on every spoken reply.** Kokoro loads its
+  voice files through `huggingface_hub`, which revalidates cached files against
+  the Hub, and it resolves voices at synthesis time — so a fully downloaded,
+  local voice still produced a request to huggingface.co each time Jarvis spoke.
+  Speech-to-text did the same once per load. Loading weights from disk alone is
+  now the default in every network mode (`storage.speech_models_local_only`);
+  the network is for downloading a model that is missing, never for confirming
+  one already present.
+- **The model store setting had never been applied.** `storage.huggingface_home`
+  has named a directory inside the Jarvis data folder since Phase 1 and nothing
+  read it, so the speech libraries used their own cache under the user profile.
+  It is applied now. An `HF_HOME` you set yourself still wins.
+- **The offline switch for speech models was read too late to work.**
+  `huggingface_hub` captures it when the library is imported rather than when a
+  model loads, so applying it afterwards changed nothing — and the test asserted
+  only that the environment variable was set, which it always was. The library
+  is now told directly, and the test checks what the library believes.
+- **"Bring this window to the front" reported success without checking.** It
+  confirmed only that the window was no longer minimised — which it usually was
+  not — while Windows routinely refuses `SetForegroundWindow` from a process
+  that does not already own the foreground. It now asks Windows which window
+  actually has it, so an activate that did nothing is reported as unverified.
+  The same shape as a launch reporting success because the browser was already
+  running: a check that cannot tell "my effect happened" from "something
+  unrelated was already true".
+- **A turn that ran out of steps reported failure for actions that had already
+  succeeded.** "Move WhatsApp to the left half" moved the window and then said
+  *"stopped after 4 rounds of tool calls… nothing further was run"*, which reads
+  as the action having failed. The bound stays — PRD FR-123 requires one — but
+  the report now names what completed before saying it stopped, and collapses
+  identical repeats, since a model retrying the same call is usually why the
+  limit was reached. The limit itself is raised from 4 to 8: arranging two
+  windows needs a listing, two arranges and a round to answer in, and four left
+  no room for that.
+- **Window listings read out executable names and full titles.** Each window now
+  carries a plain application name — "WhatsApp" rather than `WhatsApp.Root.exe`,
+  "File Explorer" rather than `explorer.exe` — and applications that merely host
+  something else are named by their window instead. The executable is still what
+  matching keys on; it is no longer what gets said.
+- **Jarvis narrated commands that had already worked.** A finished action is
+  self-evidencing, and the reply policy said so — but it read the reply for a
+  question mark *before* applying that rule, and the model ends nearly every
+  completed action with an offer ("Want me to check system status?"). One
+  question mark was enough to turn "opened it" into four seconds of narration
+  about a window already on screen. A question now earns speech only when no
+  tool ran to answer it with, so a real clarification is still spoken and a
+  conversational flourish is not.
+- **"Open YouTube and search for X" opened YouTube and then could not search
+  it.** Opening YouTube launched Brave without an automation port, which is
+  precisely what stopped the search that followed — so Jarvis broke its own next
+  step and then asked you to close a browser it had opened itself, 56 seconds
+  earlier. It now restarts the browser instead of asking you to, and the tool
+  descriptions steer a request that says what to do *after* opening straight to
+  the tool that does the whole job.
+- **"Allow for this task" was discarded every time you chose it.** The dialog
+  offered it, the engine rejected it (`scope 'task' requires a task_id`) because
+  only scheduled tasks carried an id and a spoken request did not — so the
+  approval was silently downgraded to single use and you were asked again on the
+  next sentence, four times in seven minutes on 2026-08-05. A conversation turn
+  now carries its own task id, so one approval covers everything that request
+  needs. A test walks the offered scopes and grants each one, so the dialog and
+  the engine cannot drift apart again.
+- **Closing a browser tab broke every later request** with "Target page, context
+  or browser has been closed". Liveness was checked on the *browser*, which was
+  fine; the single cached tab was what had died, and nothing looked at it. A
+  closed tab is now replaced with a new one, and a live tab is still reused so
+  "play the second video" lands on the page the search just read.
+- **The tab Jarvis opened came back in light mode** among a window of dark ones,
+  because Playwright emulates `prefers-color-scheme: light` on pages it creates.
+  That emulation is now switched off.
+- **Jarvis narrated actions it had not taken** — "Now searching for best
+  monitors" while nothing had been searched, carrying the label "confirmed by a
+  tool" because an unrelated tool had verified something else. Nothing is ever
+  under way when Jarvis speaks: a turn runs its tools to completion first, so an
+  action described as in progress is false either way, and is now rewritten to
+  say what actually ran.
+- **Searching YouTube stopped working once automation moved to the owner's own
+  Brave profile.** A browser that is already running cannot be given an
+  automation port — `--remote-debugging-port` only applies when Chromium starts,
+  and a second `brave.exe` hands its command line to the running instance and
+  exits. Automation previously drove a dedicated profile that was rarely already
+  open, so this case was rare; pointing it at a profile the owner uses all day
+  made it the normal case. Jarvis now checks before launching, so it answers in
+  about a second instead of waiting 20s for a port that cannot appear, and says
+  which two things actually resolve it.
+- **Restarting Jarvis no longer leaves browser automation dead until Brave is
+  closed too.** A browser Jarvis started earlier is re-attached by recalling the
+  port Chromium records in its own `DevToolsActivePort` file, confirmed live
+  before it is trusted, since that file outlives a crash.
+- **Quitting Jarvis no longer closes a browser it did not open.** Teardown always
+  detaches, but only closes browsers Jarvis started itself.
+
+### Security
+
+- **Browser automation may now hold a standing grant, which is a real reduction
+  in control and is recorded as one** (ADR-0032, `THREAT_MODEL.md`). Combined
+  with ADR-0019's decision to drive the owner's own signed-in profile, an action
+  a page induces runs as the signed-in user with no per-action confirmation. The
+  defences that were already load-bearing become more so: results are selected by
+  position and never by text, page content is quoted as untrusted, and an
+  anti-bot challenge stops the session. Taken knowingly by the person whose
+  accounts are at stake, after the trade-off was put in writing.
+- **All browser work now runs on one owned thread.** Playwright's synchronous API
+  is bound to the thread that created it, and the tool executor has four workers
+  and abandons the thread — not the work — when a tool times out. Every recorded
+  session ended with `greenlet.error: Cannot switch to a different thread` raised
+  from the GUI thread during teardown, which means the browser was *not* being
+  closed and the debugging port was left open. Teardown is a security control
+  under ADR-0031, so a teardown that always raised was the control not running.
+- **A browser could be left listening on a debugging port with Jarvis gone.**
+  When a tool exceeds its timeout the invoker abandons the *future*, not the
+  thread; an attach that completed afterwards was stored in a workspace that had
+  already shut down, so nothing ever closed it. Observed on 2026-08-05, six
+  seconds after the application exited. A session that finishes opening into a
+  closed workspace is now closed immediately. ADR-0031 treats that teardown as a
+  security control rather than tidiness, which makes this a leak of the control
+  itself.
+- **A web page could break out of the wrapper that quotes it.** Content observed
+  from outside — pages, filenames, documents — is enclosed in delimiters that
+  tell the model it is data and authorises nothing. Those delimiters are fixed
+  strings published in the source, and the content was embedded verbatim, so a
+  page containing the closing delimiter ended the quoted region early and
+  anything it wrote after that point appeared to the model as trusted context.
+  Delimiters in observed content are now escaped, and kept visible rather than
+  stripped, so an attempt to break out shows up in the audit log instead of
+  silently disappearing. Found by the test written for it, before any code in
+  this product could fetch a page.
+- **Observed content now has one shape and no trusted variant.** Everything read
+  from outside becomes an `Observation`, which cannot express a capability, a
+  grant, a risk level or a tool id, and which reaches the model through a single
+  constructor that marks it untrusted with no way to override.
+- **Choosing "the second video" is now a position, not a title.** Actions on
+  observed lists resolve by ordinal, and there is no lookup by text at all, so a
+  page cannot rename itself into redirecting an action. This is the control that
+  does not depend on the model cooperating; the delimiters are defence in depth.
+
+### Changed
+
+- **Jarvis no longer claims it verified an application launch when it did not.**
+  Opening an application whose process was *already running* — most often Brave,
+  which almost everything opens through — now reports **unverified** rather than
+  success, and says why. This will read as a regression and is the opposite: the
+  old behaviour reported a confirmed success while observing nothing about its own
+  effect, which is how "Open YouTube Music" recorded `succeeded / verified` every
+  time it opened a browser tab instead of the app. Confirming these launches
+  properly needs to observe a *window*, which arrives with UI Automation later in
+  Phase 2. Until then Jarvis says it does not know, which by design does not
+  satisfy a task's success criteria (FR-048, AT-018).
+
 ## [0.2.0.dev0] — 2026-08-04 — Phase 1: voice-first local assistant
 
 **Phase 1 is closed.** All five PRD §21 exit criteria were met and confirmed by
